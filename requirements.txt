@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+sqlalchemy
+alembic
+psycopg2-binary
+chromadb
+redis
+sentence-transformers
+pypdf2
+python-docx
+pillow
+celery
+networkx
+httpx
+pydantic
+python-multipart
