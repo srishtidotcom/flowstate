@@ -21,7 +21,7 @@ def enrich_task(task: Task, team_id: str) -> Task:
     # Step 3: Detect duplicates
     duplicates = detect_duplicates(task, team_id)
     if duplicates:
-        task.duplicate_candidates = [dup.task_id for dup in duplicates]
+        task.duplicate_candidates = duplicates if duplicates else []
 
     return task
 

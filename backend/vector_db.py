@@ -1,38 +1,37 @@
-from typing import List, Dict, Optional
+import chromadb
+import os
+from typing import List, Optional
 from backend.models import Task
 
-# Mock ChromaDB client
-class ChromaDBClient:
-    def query(
-        self,
-        collection: str,
-        query_embedding: List[float],
-        top_k: int = 3,
-        threshold: float = 0.92,
-    ) -> List[Task]:
-        """
-        Mock query for similar tasks in ChromaDB.
-        In a real implementation, this would query the actual vector database.
-        """
-        # Mock response: Return similar tasks if the query matches
-        mock_tasks = [
-            Task(
-                task_id="task_123",
-                task="Complete pitch deck",
-                owner="Rahul",
-                deadline="2026-03-26T23:59:00+05:30",
-                confidence=0.95,
-                source_ref="sample_screenshot.png",
-                team_id="team_alpha",
-            ),
-            Task(
-                task_id="task_456",
-                task="Review project plan",
-                owner="Priya",
-                deadline="2026-03-27T18:00:00+05:30",
-                confidence=0.90,
-                source_ref="sample_chat.txt",
-                team_id="team_alpha",
-            ),
-        ]
-        return mock_tasks
+CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
+CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
+
+client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+
+def get_or_create_collection(team_id: str):
+    return client.get_or_create_collection(name=f"tasks_{team_id}")
+
+def store_task(task: Task, embedding: List[float]):
+    """Store a task and its embedding in ChromaDB."""
+    collection = get_or_create_collection(task.team_id)
+    collection.upsert(
+        ids=[task.task_id or task.task],
+        embeddings=[embedding],
+        documents=[task.task],
+        metadatas=[{
+            "owner": task.owner or "",
+            "deadline": task.deadline or "",
+            "confidence": str(task.confidence),
+            "source_ref": task.source_ref,
+            "team_id": task.team_id
+        }]
+    )
+
+def query_similar_tasks(team_id: str, embedding: List[float], top_k: int = 3) -> List[dict]:
+    """Query ChromaDB for similar tasks."""
+    collection = get_or_create_collection(team_id)
+    results = collection.query(
+        query_embeddings=[embedding],
+        n_results=top_k
+    )
+    return results
