@@ -689,8 +689,8 @@ No cloud dependency required — runs entirely locally.
 | Phase 1 — Ingestion Layer | 🔨 In Progress / Testing | Upload API live, Celery queue being tested |
 | Phase 2 — Preprocessing | 🔨 In Progress / Testing | Text + PDF working, image OCR via LLaVA in testing |
 | Phase 3 — Extraction Engine | 🔨 In Progress / Testing | Schema enforcement + few-shot prompts in testing |
-| Phase 4 — Enrichment | ⬜ Not Started | |
-| Phase 5 — DAG Engine | ⬜ Not Started | |
+| Phase 4 — Enrichment | 🔨 In Progress / Testing | |
+| Phase 5 — DAG Engine | 🔨 In Progress / Testing | |
 | Phase 6 — Governance | ⬜ Not Started | |
 | Phase 7 — Memory Architecture | ⬜ Not Started | |
 | Phase 8 — Automation | ⬜ Not Started | |
