@@ -28,8 +28,8 @@ Return ONLY a valid JSON array, no explanation, no markdown.
 
 def extract_tasks(chunks: List[Chunk]) -> List[ExtractedTask]:
     conversation = "\n".join(
-        [f"{c.speaker}: {c.text}" if c.speaker else c.text for c in chunks]
-    )
+    [f"{c.speaker}: {c.text}" if c.speaker else c.text for c in chunks[:100]]
+)
 
     response = httpx.post(
         f"{OLLAMA_API_BASE}/api/chat",
