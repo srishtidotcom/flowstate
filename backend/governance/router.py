@@ -3,7 +3,7 @@ import redis
 import json
 import logging
 from typing import List, Optional
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 from pydantic import BaseModel
 from typing import Optional, List
 

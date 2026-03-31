@@ -137,3 +137,8 @@ wcwidth==0.6.0
 websocket-client==1.9.0
 websockets==16.0
 zipp==3.23.0
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+pydantic-settings

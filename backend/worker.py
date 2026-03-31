@@ -11,6 +11,7 @@ from backend.graph.dag import get_dag_summary
 from backend.vector_db import store_tasks_batch
 from backend.models import Task
 from backend.governance.router import route_tasks
+from backend.automation.trigger import trigger_approved_tasks
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 r = redis.from_url(REDIS_URL)
@@ -99,6 +100,10 @@ def process_job(job: dict):
     for t in routing['review']:
         print(f"    - {t}")
 
+    # Phase 8 — Automation
+    approved_tasks = [t for t in enriched_tasks if t.deadline]
+    trigger_approved_tasks(approved_tasks)
+    
 def run_worker():
     print("Worker is listening for jobs...")
     while True:
