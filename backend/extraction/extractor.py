@@ -44,50 +44,56 @@ MAX_CHUNKS = 60
 MAX_CHUNK_CHARS = 300
 
 def extract_tasks(chunks: List[Chunk]) -> List[ExtractedTask]:
-    filtered = [c for c in chunks if c.text and len(c.text.strip()) > 0]
-    capped = [
-        Chunk(
-            text=c.text[:MAX_CHUNK_CHARS],
-            speaker=c.speaker,
-            metadata=getattr(c, "metadata", None)
+    all_tasks = []
+    batch_size = 100
+
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        conversation = "\n".join(
+            [f"{c.speaker}: {c.text}" if c.speaker else c.text for c in batch]
         )
-        for c in filtered[:MAX_CHUNKS]
-    ]
-    conversation = "\n".join(
-        [f"{c.speaker}: {c.text}" if c.speaker else c.text for c in capped]
-    )
 
-    response = httpx.post(
-        f"{OLLAMA_API_BASE}/api/chat",
-        json={
-            "model": "mistral",
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": conversation}
-            ],
-            "stream": False
-        },
-        timeout=120.0
-    )
+        print(f"  Processing batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}...")
 
-    raw = response.json()["message"]["content"]
+        try:
+            response = httpx.post(
+                f"{OLLAMA_API_BASE}/api/chat",
+                json={
+                    "model": "mistral",
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": conversation}
+                    ],
+                    "stream": False
+                },
+                timeout=120.0
+            )
 
-    try:
-        tasks_data = json.loads(raw)
-    except json.JSONDecodeError:
-        # Try to extract JSON array from response if model added extra text
-        start = raw.find("[")
-        end = raw.rfind("]") + 1
-        tasks_data = json.loads(raw[start:end])
+            raw = response.json()["message"]["content"]
 
-    tasks = []
-    for t in tasks_data:
-        tasks.append(ExtractedTask(
-            title=t.get("title", ""),
-            owner=t.get("owner"),
-            deadline=t.get("deadline"),
-            confidence=t.get("confidence", 0.5),
-            source_snippet=None,
-            dependencies=t.get("dependencies", [])
-))
-    return tasks
+            try:
+                tasks_data = json.loads(raw)
+            except json.JSONDecodeError:
+                start = raw.find("[")
+                end = raw.rfind("]") + 1
+                if start != -1 and end > start:
+                    tasks_data = json.loads(raw[start:end])
+                else:
+                    print(f"  ⚠️ Batch {i//batch_size + 1} returned invalid JSON, skipping")
+                    continue
+
+            for t in tasks_data:
+                all_tasks.append(ExtractedTask(
+                    title=t.get("title", ""),
+                    owner=t.get("owner"),
+                    deadline=t.get("deadline"),
+                    confidence=t.get("confidence", 0.5),
+                    source_snippet=None,
+                    dependencies=t.get("dependencies", [])
+                ))
+
+        except Exception as e:
+            print(f"  ⚠️ Batch {i//batch_size + 1} failed: {e}, skipping")
+            continue
+
+    return all_tasks
