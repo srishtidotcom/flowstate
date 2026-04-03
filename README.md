@@ -770,11 +770,11 @@ No cloud dependency required — runs entirely locally.
 | Phase 3 — Extraction Engine | 🔨 In Progress / Testing | Schema enforcement + few-shot prompts in testing |
 | Phase 4 — Enrichment | 🔨 In Progress / Testing | pipeline.py, ownership.py, deadlines.py, duplicates.py implemented |
 | Phase 5 — DAG Engine | 🔨 In Progress / Testing | dag.py implemented with build, critical path, bottleneck, summary functions |
-| Phase 6 — Governance | ⬜ Not Started | |
-| Phase 7 — Memory Architecture | ⬜ Not Started | |
-| Phase 8 — Automation | ⬜ Not Started | |
+| Phase 6 — Governance | 🔨 In Progress / Testing | |
+| Phase 7 — Memory Architecture | 🔨 In Progress / Testing | |
+| Phase 8 — Automation | 🔨 In Progress / Testing | |
 | Phase 9 — Dashboard | ⬜ Not Started | |
-| Phase 10 — Evaluation | ⬜ Not Started | |
+| Phase 10 — Evaluation | 🔨 In Progress / Testing | |
 | Phase 11 — Deployment | ⬜ Not Started | |
 
 ---
