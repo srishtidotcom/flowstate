@@ -8,7 +8,7 @@ alembic>=1.11.0
 psycopg2-binary>=2.9.6
 
 # Vector Database
-chromadb>=0.4.0
+chromadb>=0.6.0
 
 # Task Queue and Caching
 redis>=4.5.0
