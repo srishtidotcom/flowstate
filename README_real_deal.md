@@ -1,6 +1,6 @@
 # Flowstate 🌊
 
-> An always-on workflow orchestrator that watches where work actually happens — Slack, email, GitHub, docs — extracts tasks and dependencies automatically, builds a live dependency graph, and acts on it without anyone maintaining a project management tool.
+> An always-on workflow orchestrator that watches where work actually happens — Whatsapp, Slack, email, GitHub, docs — extracts tasks and dependencies automatically, builds a live dependency graph, and acts on it without anyone maintaining a project management tool.
 
 Built by **Siya** and **Srishti**.
 
