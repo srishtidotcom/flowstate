@@ -1,810 +1,954 @@
-# 🚀 Flowstate — Build Log
+# Flowstate 🌊
 
-> **Status:** 🔨 Active Development
-> **Builders:** Siya & Srishti
-> **Project:** AI-Powered Workflow Orchestration System
-> **Last Updated:** March 2026
+> An always-on workflow orchestrator that watches where work actually happens — Whatsapp, Slack, email, GitHub, docs — extracts tasks and dependencies automatically, builds a live dependency graph, and acts on it without anyone maintaining a project management tool.
 
----
-
-## 📌 What We're Building
-
-Flowstate is an AI-powered workflow orchestration system that converts unstructured communication (WhatsApp exports, emails, meeting transcripts, screenshots) into structured, actionable task workflows — running locally via Ollama.
-
-We're currently in the **build phase**, implementing the full 11-phase architecture described in the system design. This README tracks our progress, setup steps, and build process end-to-end.
-
-> **Inference Strategy:** We're using **Ollama as the primary runtime** throughout phases 0–11. Lemonade integration will be explored as a performance optimization layer after all phases are complete and stable.
+Built by **Siya** and **Srishti**.
 
 ---
 
-## 👩‍💻 Team
+## What this is
 
-| Name | Role |
-|------|------|
-| Siya | Co-builder |
-| Srishti | Co-builder |
+Flowstate is not a to-do list. It's not a project tracker. It's the intelligent layer that sits underneath all of that.
 
----
+Every team has two versions of their work:
+- **The official version** — Jira boards, Notion pages, Gantt charts that go stale within 48 hours
+- **The real version** — scattered across Slack threads, email chains, Google Docs comments, and someone's memory
 
-## 🗂️ Table of Contents
-
-1. [Project Structure](#project-structure)
-2. [Prerequisites](#prerequisites)
-3. [Environment Setup](#environment-setup)
-4. [Installation](#installation)
-5. [Build Process — Phase by Phase](#build-process)
-6. [Running the System](#running-the-system)
-7. [Testing & Evaluation](#testing--evaluation)
-8. [Deployment](#deployment)
-9. [Current Progress](#current-progress)
-10. [Known Issues](#known-issues)
+Flowstate reads the real version. It builds a dependency graph from it, keeps it alive, and acts on it — nudging blockers, scheduling reminders, drafting messages, routing approvals — automatically.
 
 ---
 
-## 📁 Project Structure
+## Stack
 
-<!-- FIX #1: Rewritten to match the actual repository layout -->
+| Layer | Technology |
+|---|---|
+| API | FastAPI |
+| Database | PostgreSQL + SQLAlchemy + Alembic |
+| Queue | Redis + custom worker |
+| Vector store | ChromaDB |
+| Graph engine | NetworkX |
+| LLM | Mistral (local via Ollama) |
+| Embeddings | SentenceTransformer |
+| Frontend | React + Vite |
+
+---
+
+## Repo structure
 
 ```
 flowstate/
 ├── backend/
-│   ├── ingestion/          # Phase 1: File upload & async queue
-│   │   └── upload.py
-│   ├── preprocessing/      # Phase 2: Multimodal normalization
-│   │   └── normalizer.py
-│   ├── extraction/         # Phase 3: LLM task extraction
-│   │   └── extractor.py
-│   ├── enrichment/         # Phase 4: Ownership inference, deduplication
-│   │   ├── pipeline.py
-│   │   ├── ownership.py
-│   │   ├── deadlines.py
-│   │   └── duplicates.py
-│   ├── graph/              # Phase 5: DAG task graph engine
-│   │   └── dag.py
-│   ├── api/                # FastAPI entrypoint
-│   │   ├── main.py
-│   │   └── enrichment.py
-│   ├── worker.py           # Async Redis job consumer
-│   ├── ml.py
-│   ├── models.py
-│   ├── db.py
-│   └── vector_db.py
-├── inference/
-│   └── ollama/             # Primary runtime config
-│       └── pull_model.sh
-├── docker/
-│   └── docker-compose.yml
-├── .env.example
-├── testing.md              # Full testing guide
-└── README.md               # ← You are here
+│   ├── main.py                  # FastAPI entry point
+│   ├── db.py                    # DB session (being replaced — see Layer 0)
+│   └── worker.py                # Redis job consumer
+├── flowstate/
+│   ├── infra/                   # DB/Redis/Chroma bootstrapping (Layer 0)
+│   ├── config.py                # Workspace + env config (Layer 0)
+│   ├── watchers/                # Always-on input sources (Layer 1)
+│   │   ├── base.py
+│   │   ├── file_watcher.py
+│   │   └── email_watcher.py
+│   ├── extraction/              # LLM-based task extraction
+│   │   └── extractor.py         ✅ working
+│   ├── preprocessing/
+│   │   └── normalizer.py        ✅ working
+│   ├── enrichment/              # Ownership, deadlines, dedup ✅ working
+│   ├── graph/
+│   │   └── dag.py               ✅ skeleton — extending in Layer 2
+│   ├── governance/
+│   │   └── router.py            ✅ working
+│   ├── connectors/              # Output actions (Layer 3)
+│   │   ├── base.py
+│   │   └── registry.py
+│   ├── drafting/                # Message drafting engine (Layer 4)
+│   ├── agent/                   # Agent loop + tools (Layer 5)
+│   ├── evaluation/              # Scoring + feedback (Layer 6)
+│   │   └── scorer.py
+│   └── mcp_server.py            # MCP server entry point (Layer 5)
+├── automation/
+│   ├── calendar.py              ✅ working — becomes first connector
+│   └── trigger.py               ✅ idempotency pattern — reuse everywhere
+├── vector_db.py                 ✅ working
+├── ml.py                        ✅ working
+├── frontend/                    # React + Vite (Layer 7)
+├── alembic/                     ✅ skeleton exists
+├── docker-compose.yml
+└── .env.example
 ```
 
 ---
 
-## ✅ Prerequisites
+## What's already working — don't rewrite these
 
-Make sure the following are installed and configured before proceeding.
-
-### System Requirements
-
-- OS: Ubuntu 22.04+ / Windows 11 with WSL2 / macOS 13+
-- RAM: 16 GB minimum (32 GB recommended for local LLM)
-- CPU: Any modern multi-core processor
-- GPU (optional): Any CUDA or Metal-compatible GPU
-- Disk: 30 GB free space (for models + data)
-
-### Required Tools
-
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Python | 3.10+ | Backend runtime |
-| Node.js | 18+ | Frontend |
-| Docker + Docker Compose | Latest | Containerised services |
-| Git | Any | Version control |
-| Ollama | Latest | LLM inference runtime |
-| Tesseract OCR | Latest | System-level OCR binary (required for image preprocessing) |
-
-<!-- FIX #8: Added OS-level Tesseract install instructions -->
-
-### Installing Tesseract OCR
-
-The Python package `pytesseract` is a wrapper around the Tesseract binary, which must be installed at the OS level separately:
-
-```bash
-# Ubuntu / Debian
-sudo apt-get install tesseract-ocr
-
-# macOS
-brew install tesseract
-
-# Windows
-# Download the installer from:
-# https://github.com/UB-Mannheim/tesseract/wiki
-```
+| Module | Status | Notes |
+|---|---|---|
+| `extraction/extractor.py` | ✅ | Mistral task extraction — just extend |
+| `enrichment/` | ✅ | Ownership, deadlines, dedup — solid |
+| `graph/dag.py` | ✅ | NetworkX DAG + critical path — good skeleton |
+| `governance/router.py` | ✅ | Approve/review routing |
+| `automation/calendar.py` | ✅ | Google Calendar — becomes first connector |
+| `automation/trigger.py` | ✅ | Idempotency hash — copy this pattern for all connectors |
+| `vector_db.py` | ✅ | ChromaDB + similarity search |
+| `ml.py` | ✅ | SentenceTransformer embeddings |
+| Redis queue + `worker.py` | ✅ | Extend, don't rewrite |
+| Alembic + Postgres config | ✅ | Skeleton — finish it in Layer 0 |
 
 ---
 
-## 🛠️ Environment Setup
-
-### Step 1 — Clone the Repository
-
-```bash
-git clone https://github.com/your-org/flowstate.git
-cd flowstate
-```
-
-### Step 2 — Create and Activate Python Virtual Environment
-
-```bash
-python3 -m venv venv
-source venv/bin/activate        # Linux / macOS
-# or
-venv\Scripts\activate           # Windows
-```
-
-### Step 3 — Copy Environment Variables
-
-```bash
-cp .env.example .env
-```
-
-<!-- FIX #6: Clarified that the password must match the docker-compose.yml hardcoded value -->
-
-Open `.env` and fill in the required fields:
-
-```env
-# Inference
-INFERENCE_RUNTIME=ollama
-OLLAMA_API_BASE=http://localhost:11434
-
-# Database
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=flowstate
-POSTGRES_USER=flowstate_user
-POSTGRES_PASSWORD=flowstate123
-
-# ChromaDB
-CHROMA_HOST=localhost
-CHROMA_PORT=8000
-
-# Redis (for async queue)
-REDIS_URL=redis://localhost:6379
-
-# Object Store
-OBJECT_STORE_PATH=./storage/objects
-
-# Confidence thresholds
-EXTRACTION_CONFIDENCE_THRESHOLD=0.75
-OWNERSHIP_INFERENCE_THRESHOLD=0.70
-DUPLICATE_SIMILARITY_THRESHOLD=0.85
-
-# Optional: Calendar integration
-GOOGLE_CALENDAR_CREDENTIALS_PATH=./credentials/google_calendar.json
-```
-
-> **Important:** The `POSTGRES_PASSWORD` value must match the password hardcoded in `docker/docker-compose.yml`. The default in both files is `flowstate123`. If you change it here, update `docker/docker-compose.yml` to match before starting services.
+## Build phases
 
 ---
 
-## 📦 Installation
+## 🔧 Layer 0 — Foundations
+### *Do this first. Everything else depends on it.*
 
-### Step 4 — Install Python Dependencies
+---
+
+### 0.1 — Replace the mock DB with real PostgreSQL
+
+`backend/db.py` is currently a mock dict. Replace it with a real SQLAlchemy schema.
+
+**Tables to define:**
+
+```python
+# flowstate/infra/models.py
+
+from sqlalchemy import Column, String, DateTime, ForeignKey, Enum, Text, Boolean
+from sqlalchemy.orm import declarative_base, relationship
+import enum, uuid
+
+Base = declarative_base()
+
+class TaskStatus(str, enum.Enum):
+    open = "open"
+    in_progress = "in_progress"
+    blocked = "blocked"
+    done = "done"
+
+class DependencyType(str, enum.Enum):
+    blocks = "blocks"
+    informs = "informs"
+    requires_approval = "requires_approval"
+
+class Task(Base):
+    __tablename__ = "tasks"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    title = Column(String, nullable=False)
+    owner = Column(String)
+    deadline = Column(DateTime)
+    status = Column(Enum(TaskStatus), default=TaskStatus.open)
+    team_id = Column(String, ForeignKey("teams.id"), nullable=False)
+    source_ref_id = Column(String, ForeignKey("source_refs.id"))
+    created_at = Column(DateTime)
+    updated_at = Column(DateTime)
+
+class Dependency(Base):
+    __tablename__ = "dependencies"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    from_task_id = Column(String, ForeignKey("tasks.id"))
+    to_task_id = Column(String, ForeignKey("tasks.id"))
+    dep_type = Column(Enum(DependencyType), default=DependencyType.blocks)
+
+class Team(Base):
+    __tablename__ = "teams"
+    id = Column(String, primary_key=True)
+    name = Column(String)
+    llm_provider = Column(String, default="ollama")
+    timezone = Column(String, default="UTC")
+
+class SourceRef(Base):
+    __tablename__ = "source_refs"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    source = Column(String)       # "slack", "email", "github", etc.
+    external_id = Column(String)  # message ID, PR number, etc.
+    url = Column(String)
+    team_id = Column(String, ForeignKey("teams.id"))
+
+class ConnectorRun(Base):
+    __tablename__ = "connector_runs"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    connector_name = Column(String)
+    task_id = Column(String, ForeignKey("tasks.id"))
+    status = Column(String)       # "success", "failed", "skipped"
+    ran_at = Column(DateTime)
+    result = Column(Text)
+```
+
+Wire up Alembic:
 
 ```bash
-pip install -r requirements.txt
-```
-
-Key packages being installed:
-
-```
-fastapi uvicorn
-sqlalchemy alembic psycopg2-binary
-chromadb
-redis
-sentence-transformers
-pypdf2 python-docx pillow
-pytesseract                   # Image OCR (requires system-level Tesseract — see Prerequisites)
-networkx                      # DAG graph engine
-httpx
-pydantic
-python-multipart
-```
-
-### Step 5 — Install Node.js Dependencies (Frontend)
-
-```bash
-cd frontend
-npm install
-cd ..
-```
-
-### Step 6 — Install and Configure Ollama (Primary Inference Runtime)
-
-Ollama is our primary inference runtime throughout all build phases.
-
-```bash
-# Install Ollama
-curl -fsSL https://ollama.ai/install.sh | sh
-
-# Pull the primary text model
-# FIX #7: Using "mistral" consistently — this is the tag used in backend/extraction/extractor.py
-ollama pull mistral
-
-# Start the Ollama server
-ollama serve
-```
-
-Ollama exposes an OpenAI-compatible API at `http://localhost:11434` — no code changes needed.
-
-Verify it's running:
-
-```bash
-curl http://localhost:11434/api/tags
-```
-
-> **Note on Lemonade:** AMD's Lemonade runtime will be evaluated as a future optimization layer once all 11 phases are fully built and stable on Ollama. No Lemonade setup is required at this stage.
-
-### Step 7 — Install Sentence Transformers (Embeddings)
-
-```bash
-python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-```
-
-This will download the MiniLM model (~80 MB) on first run.
-
-### Step 8 — Start Infrastructure Services via Docker
-
-<!-- FIX #3: Added the correct -f flag with path to docker/docker-compose.yml -->
-
-```bash
-docker-compose -f docker/docker-compose.yml up -d postgres chromadb redis
-```
-
-This starts:
-- **PostgreSQL** on port `5432` — structured task/graph storage
-- **ChromaDB** on port `8000` — vector store for embeddings
-- **Redis** on port `6379` — async message queue
-
-Verify they're running:
-
-```bash
-docker-compose -f docker/docker-compose.yml ps
-```
-
-### Step 9 — Run Database Migrations
-
-```bash
+alembic revision --autogenerate -m "initial schema"
 alembic upgrade head
 ```
 
-This sets up all tables: `tasks`, `owners`, `deadlines`, `graph_edges`, `confidence_scores`, `version_history`.
+---
+
+### 0.2 — Infra bootstrapping
+
+Business logic should never import a database connection directly. Keep infra behind a clean boundary:
+
+```python
+# flowstate/infra/__init__.py
+
+from flowstate.infra.db import get_db_session
+from flowstate.infra.redis_client import get_redis
+from flowstate.infra.chroma_client import get_chroma
+
+# Usage in any module:
+# from flowstate.infra import get_db_session
+```
+
+```python
+# flowstate/infra/db.py
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from flowstate.config import settings
+
+engine = create_engine(settings.DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+
+def get_db_session():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+```
 
 ---
 
-## 🏗️ Build Process
+### 0.3 — Config + multi-tenancy
 
-Here's the full step-by-step build sequence we're following, phase by phase.
+```python
+# flowstate/config.py
+
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    DATABASE_URL: str
+    REDIS_URL: str
+    CHROMA_HOST: str = "localhost"
+    CHROMA_PORT: int = 8000
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    DEFAULT_MODEL: str = "mistral"
+    ENCRYPTION_KEY: str  # for connector credentials
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+```
+
+Every resource — watcher, connector, agent, task — must carry `team_id`. No exceptions. If you're writing a function that touches tasks or connectors and it doesn't accept `team_id`, it's wrong.
 
 ---
 
-### Phase 0 — Inference Runtime Layer 🔨 In Progress / Testing
+## 👂 Layer 1 — Watchers
+### *The always-on input layer. These run forever.*
 
-**Goal:** Set up the Ollama inference layer that powers all extraction.
+---
+
+### Base class
+
+```python
+# flowstate/watchers/base.py
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
+from typing import List
+import time
+
+@dataclass
+class RawEvent:
+    source: str           # "slack", "email", "github", etc.
+    content: str          # raw text content
+    metadata: dict        # source-specific (channel, sender, PR number, etc.)
+    team_id: str
+    timestamp: datetime
+    external_id: str      # for deduplication
+
+class BaseWatcher(ABC):
+    def __init__(self, team_id: str, poll_interval: int = 60):
+        self.team_id = team_id
+        self.poll_interval = poll_interval
+
+    @abstractmethod
+    def fetch_new_events(self) -> List[RawEvent]:
+        """Fetch events since last run. Must be idempotent."""
+        ...
+
+    def run_forever(self):
+        print(f"[{self.__class__.__name__}] Starting for team {self.team_id}")
+        while True:
+            try:
+                events = self.fetch_new_events()
+                for event in events:
+                    self._push_to_queue(event)
+            except Exception as e:
+                print(f"[{self.__class__.__name__}] Error: {e}")
+            time.sleep(self.poll_interval)
+
+    def _push_to_queue(self, event: RawEvent):
+        from flowstate.infra import get_redis
+        import json
+        r = get_redis()
+        r.rpush("flowstate:raw_events", json.dumps({
+            "source": event.source,
+            "content": event.content,
+            "metadata": event.metadata,
+            "team_id": event.team_id,
+            "timestamp": event.timestamp.isoformat(),
+            "external_id": event.external_id,
+        }))
+```
+
+---
+
+### Watcher → normalizer contract
+
+The existing `preprocessing/normalizer.py` produces `Chunk` objects. Extend it to accept `RawEvent`:
+
+```python
+# preprocessing/normalizer.py (extend this)
+
+from flowstate.watchers.base import RawEvent
+
+def normalize_raw_event(event: RawEvent) -> List[Chunk]:
+    """Convert any RawEvent into Chunks for the extraction pipeline."""
+    return normalize(
+        content=event.content,
+        source=event.source,
+        metadata={**event.metadata, "team_id": event.team_id}
+    )
+```
+
+This means Slack messages, emails, GitHub comments, and uploaded files all funnel into the exact same extraction pipeline. One pipe. All sources.
+
+---
+
+### Watcher build order
+
+| Priority | Watcher | Source | Method |
+|---|---|---|---|
+| 1 | `FileWatcher` | Local files / mounted Drive | inotify / polling |
+| 2 | `EmailWatcher` | Gmail / Outlook | Gmail API push |
+| 3 | `SlackWatcher` | Slack workspace | Slack Events API |
+| 4 | `GitHubWatcher` | PRs, issues, comments | GitHub Webhooks |
+| 5 | `JiraWatcher` | Issues, status changes | Jira Webhooks |
+| 6 | `WhatsAppWatcher` | WhatsApp Business | Webhook |
+| 7 | `CalendarWatcher` | Google / Outlook | API polling |
+| 8 | `NotionWatcher` | Pages, databases | Notion API polling |
+
+---
+
+## 🔗 Layer 2 — DAG Engine
+### *The core product. The graph is everything.*
+
+---
+
+### The problem with the current DAG
+
+`graph/dag.py` is ephemeral — it lives in memory per extraction run. We need it to be **live** and **persisted**.
+
+### Persisting the DAG
+
+```python
+# flowstate/graph/dag.py (extend existing)
+
+import networkx as nx
+from flowstate.infra import get_db_session
+from flowstate.infra.models import Task, Dependency
+
+class FlowstateDAG:
+    def __init__(self, team_id: str):
+        self.team_id = team_id
+        self.G = nx.DiGraph()
+
+    def load_from_db(self):
+        """Load the live graph for this workspace from Postgres."""
+        with get_db_session() as db:
+            tasks = db.query(Task).filter_by(team_id=self.team_id).all()
+            deps = db.query(Dependency).join(
+                Task, Dependency.from_task_id == Task.id
+            ).filter(Task.team_id == self.team_id).all()
+
+        for task in tasks:
+            self.G.add_node(task.id, **{
+                "title": task.title,
+                "owner": task.owner,
+                "deadline": task.deadline,
+                "status": task.status,
+            })
+        for dep in deps:
+            self.G.add_edge(dep.from_task_id, dep.to_task_id, type=dep.dep_type)
+
+    def merge_new_tasks(self, new_tasks: list, new_deps: list):
+        """
+        Merge extraction results into the live graph.
+        Deduplicates by task title + owner. Never replaces existing nodes.
+        """
+        # dedup logic here — match by embedding similarity via ChromaDB
+        ...
+
+    def save_snapshot(self):
+        """Record current graph state as a versioned snapshot with diff."""
+        ...
+```
+
+---
+
+### Graph intelligence — expose these via API
+
+```python
+# flowstate/graph/intelligence.py
+
+def get_critical_path(dag: FlowstateDAG) -> List[str]:
+    """Return the longest dependency chain (task IDs in order)."""
+    return nx.dag_longest_path(dag.G)
+
+def get_bottlenecks(dag: FlowstateDAG, top_n: int = 5) -> List[dict]:
+    """Nodes blocking the most other nodes."""
+    centrality = nx.betweenness_centrality(dag.G)
+    return sorted([
+        {"task_id": k, "score": v}
+        for k, v in centrality.items()
+    ], key=lambda x: -x["score"])[:top_n]
+
+def get_do_first_tasks(dag: FlowstateDAG, limit: int = 10) -> List[dict]:
+    """
+    Score = (urgency × impact) / (1 + num_blockers)
+    urgency: 1/days_to_deadline
+    impact: number of tasks this unblocks
+    """
+    results = []
+    for node_id, data in dag.G.nodes(data=True):
+        deadline = data.get("deadline")
+        urgency = (1 / max((deadline - datetime.now()).days, 1)) if deadline else 0.1
+        impact = len(list(dag.G.successors(node_id)))
+        blockers = len([
+            n for n in dag.G.predecessors(node_id)
+            if dag.G.nodes[n].get("status") != "done"
+        ])
+        score = (urgency * impact) / (1 + blockers)
+        results.append({"task_id": node_id, "score": score, **data})
+    return sorted(results, key=lambda x: -x["score"])[:limit]
+
+def get_stale_blockers(dag: FlowstateDAG, stale_days: int = 3) -> List[str]:
+    """Tasks untouched for N days that are actively blocking something."""
+    stale = []
+    for node_id, data in dag.G.nodes(data=True):
+        if data.get("status") in ("open", "in_progress"):
+            updated = data.get("updated_at")
+            if updated and (datetime.now() - updated).days >= stale_days:
+                if dag.G.out_degree(node_id) > 0:  # is blocking something
+                    stale.append(node_id)
+    return stale
+```
+
+---
+
+## ⚡ Layer 3 — Connectors
+### *How Flowstate acts on the world.*
+
+---
+
+### Base class
+
+```python
+# flowstate/connectors/base.py
+
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Optional
+from flowstate.infra.models import Task
+
+@dataclass
+class GraphEvent:
+    event_type: str       # "task_blocked", "deadline_approaching", "pr_stale", etc.
+    task_id: str
+    team_id: str
+    metadata: dict
+
+@dataclass
+class ConnectorResult:
+    success: bool
+    external_id: Optional[str]   # created issue ID, message ID, etc.
+    message: str
+
+class BaseConnector(ABC):
+    name: str
+    description: str
+
+    def __init__(self, team_id: str, credentials: dict):
+        self.team_id = team_id
+        self.credentials = credentials
+
+    @abstractmethod
+    def can_handle(self, event: GraphEvent) -> bool: ...
+
+    @abstractmethod
+    def execute(self, task: Task, event: GraphEvent) -> ConnectorResult: ...
+```
+
+---
+
+### Connector registry
+
+```python
+# flowstate/connectors/registry.py
+
+from typing import Dict, List
+from flowstate.connectors.base import BaseConnector, GraphEvent
+from flowstate.infra.models import Task
+
+_registry: Dict[str, List[BaseConnector]] = {}  # team_id → list of connectors
+
+def register_connector(connector: BaseConnector):
+    _registry.setdefault(connector.team_id, []).append(connector)
+
+def get_connectors_for_team(team_id: str) -> List[BaseConnector]:
+    return _registry.get(team_id, [])
+
+def dispatch_event(task: Task, event: GraphEvent):
+    """Find all connectors that can handle this event and execute them."""
+    connectors = get_connectors_for_team(event.team_id)
+    for connector in connectors:
+        if connector.can_handle(event):
+            result = connector.execute(task, event)
+            _log_connector_run(connector.name, task.id, result)
+```
+
+---
+
+### Example: wrapping the existing calendar connector
+
+```python
+# flowstate/connectors/google_calendar.py
+
+from flowstate.connectors.base import BaseConnector, GraphEvent, ConnectorResult
+from automation.calendar import schedule_task   # existing module ✅
+
+class GoogleCalendarConnector(BaseConnector):
+    name = "google_calendar"
+    description = "Schedules tasks as Google Calendar events"
+
+    def can_handle(self, event: GraphEvent) -> bool:
+        return event.event_type == "deadline_approaching"
+
+    def execute(self, task, event) -> ConnectorResult:
+        try:
+            event_id = schedule_task(
+                title=task.title,
+                deadline=task.deadline,
+                credentials=self.credentials
+            )
+            return ConnectorResult(success=True, external_id=event_id,
+                                   message=f"Scheduled: {task.title}")
+        except Exception as e:
+            return ConnectorResult(success=False, external_id=None, message=str(e))
+```
+
+Use `automation/trigger.py`'s idempotency hash pattern for every connector so actions never fire twice.
+
+---
+
+### Connector build order
+
+| Priority | Connector | Trigger event |
+|---|---|---|
+| 1 | `GoogleCalendarConnector` | `deadline_approaching` — already exists, wrap it |
+| 2 | `SlackConnector` | `task_blocked`, `blocker_resolved`, `digest` |
+| 3 | `WebhookConnector` | any — generic escape hatch |
+| 4 | `EmailConnector` | `nudge`, `deadline_reminder` |
+| 5 | `JiraConnector` | `task_created`, `task_updated` |
+| 6 | `GitHubConnector` | `pr_stale`, `task_created` |
+| 7 | `LinearConnector` | `task_created` |
+| 8 | `NotionConnector` | `task_created`, `digest` |
+| 9 | `WhatsAppConnector` | `nudge` |
+
+---
+
+## ✍️ Layer 4 — Message Drafting Engine
+### *The difference between Flowstate feeling like a robot and a thoughtful teammate.*
+
+---
+
+```python
+# flowstate/drafting/generator.py
+
+from flowstate.infra.models import Task
+from flowstate.connectors.base import GraphEvent
+from dataclasses import dataclass
+import ollama
+
+DRAFT_PROMPTS = {
+    "nudge": """
+You are a professional assistant helping a team stay unblocked.
+Task: {title}
+Owner: {owner}
+Blocked by: {blocked_by}
+Blocking: {blocking}
+Days stuck: {days_stuck}
+
+Write a short, polite Slack message to {blocked_by_name} asking for an update.
+Do not use filler phrases. Be specific. Max 3 sentences.
+""",
+
+    "deadline_reminder": """
+Task: {title}
+Owner: {owner}
+Due: {deadline} ({hours_remaining}h remaining)
+Current status: {status}
+
+Write a brief reminder to {owner} that this task is due soon.
+Mention the deadline. Ask for a status update or flag if help is needed.
+""",
+
+    "blocker_resolved": """
+Task: {title}
+Owner: {owner}
+Previously blocked by: {was_blocked_by}
+
+This task just became unblocked. Write a short Slack message to {owner}
+letting them know they're clear to proceed.
+""",
+}
+
+@dataclass
+class Draft:
+    task_id: str
+    draft_type: str
+    body: str
+    suggested_recipient: str
+    suggested_channel: str
+    status: str = "draft"   # draft | edited_before_send | sent
+
+def generate_draft(task: Task, event: GraphEvent, draft_type: str) -> Draft:
+    prompt_template = DRAFT_PROMPTS.get(draft_type)
+    if not prompt_template:
+        raise ValueError(f"Unknown draft type: {draft_type}")
+
+    context = _build_context(task, event)
+    prompt = prompt_template.format(**context)
+
+    response = ollama.chat(model="mistral", messages=[
+        {"role": "user", "content": prompt}
+    ])
+
+    return Draft(
+        task_id=task.id,
+        draft_type=draft_type,
+        body=response["message"]["content"].strip(),
+        suggested_recipient=context.get("owner", ""),
+        suggested_channel=context.get("channel", ""),
+    )
+```
+
+**Learning from edits:** When a user edits a draft before sending, store the diff and inject it as a few-shot example in future prompts for that workspace. Implement this in `drafting/feedback.py`.
+
+### Draft types
+
+| Type | Trigger |
+|---|---|
+| `nudge` | Task is blocked waiting on a specific person |
+| `deadline_reminder` | Task due in <24h, owner hasn't updated status |
+| `blocker_resolved` | A blocking dependency just moved to done |
+| `pr_stale` | PR open 5+ days with no reviewer activity |
+| `weekly_digest` | DAG state summary, critical path changes, what's at risk |
+
+---
+
+## 🤖 Layer 5 — Agent Interface
+### *Chat-triggered commands + MCP server.*
+
+---
+
+### Agent tools
+
+Wrap every core pipeline function as a callable tool:
+
+```python
+# flowstate/agent/tools.py
+
+TOOLS = [
+    {
+        "name": "get_do_first_tasks",
+        "description": "Returns the highest-priority tasks ranked by urgency × impact / blockers.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "team_id": {"type": "string"},
+                "limit": {"type": "integer", "default": 5}
+            },
+            "required": ["team_id"]
+        }
+    },
+    {
+        "name": "get_bottlenecks",
+        "description": "Returns tasks blocking the most other tasks in the DAG.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "team_id": {"type": "string"},
+                "top_n": {"type": "integer", "default": 5}
+            },
+            "required": ["team_id"]
+        }
+    },
+    {
+        "name": "draft_message",
+        "description": "Drafts a message for a specific task and event type.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string"},
+                "draft_type": {
+                    "type": "string",
+                    "enum": ["nudge", "deadline_reminder", "blocker_resolved", "digest"]
+                }
+            },
+            "required": ["task_id", "draft_type"]
+        }
+    },
+    {
+        "name": "search_tasks",
+        "description": "Semantic search across all tasks for this workspace.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "team_id": {"type": "string"}
+            },
+            "required": ["query", "team_id"]
+        }
+    },
+    # also: ingest_document, extract_tasks, get_dag_summary, trigger_connector
+]
+```
+
+---
+
+### AgentLoop
+
+```python
+# flowstate/agent/loop.py
+
+class AgentLoop:
+    """
+    Single entry point for all chat interfaces.
+    Slack bot, WhatsApp bot, Telegram bot — all call this.
+    """
+
+    def __init__(self, team_id: str):
+        self.team_id = team_id
+
+    def run(self, user_message: str, user_id: str) -> str:
+        messages = [{"role": "user", "content": user_message}]
+
+        while True:
+            response = ollama.chat(
+                model="mistral",
+                messages=messages,
+                tools=TOOLS
+            )
+
+            if response.get("tool_calls"):
+                for call in response["tool_calls"]:
+                    result = self._dispatch_tool(call["name"], call["arguments"])
+                    messages.append({"role": "tool", "content": str(result)})
+            else:
+                return response["message"]["content"]
+
+    def _dispatch_tool(self, tool_name: str, args: dict):
+        args["team_id"] = self.team_id  # always scope to workspace
+        return TOOL_HANDLERS[tool_name](**args)
+```
+
+---
+
+### MCP Server
+
+```python
+# flowstate/mcp_server.py
+# Run with: python -m flowstate.mcp_server
+
+from mcp.server import MCPServer
+from flowstate.agent.tools import TOOLS, TOOL_HANDLERS
+
+server = MCPServer(name="flowstate")
+
+for tool in TOOLS:
+    server.register_tool(tool, TOOL_HANDLERS[tool["name"]])
+
+if __name__ == "__main__":
+    server.run()
+```
+
+Anyone using Claude Desktop, Cursor, or any MCP-compatible client can plug into Flowstate as a native toolset. This is also the `pip install flowstate` SDK path.
+
+---
+
+## 📊 Layer 6 — Evaluation & Feedback Loop
+### *We measure everything. Gut feelings are not a feedback loop.*
+
+---
+
+### Extraction scorer
+
+```python
+# flowstate/evaluation/scorer.py
+
+from dataclasses import dataclass
+from typing import List
+
+@dataclass
+class ExtractionResult:
+    extracted_tasks: List[str]   # task titles
+    ground_truth: List[str]
+
+def score_extraction(result: ExtractionResult) -> dict:
+    extracted = set(result.extracted_tasks)
+    truth = set(result.ground_truth)
+
+    tp = len(extracted & truth)
+    fp = len(extracted - truth)
+    fn = len(truth - extracted)
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0
+
+    return {"precision": precision, "recall": recall, "f1": f1, "tp": tp, "fp": fp, "fn": fn}
+```
+
+### Synthetic data generator
+
+```python
+# flowstate/evaluation/synthetic.py
+
+def generate_transcript(num_tasks: int = 5) -> dict:
+    """
+    Ask Mistral to generate a fake meeting transcript
+    with exactly num_tasks embedded action items.
+    Returns {"transcript": str, "ground_truth": List[str]}
+    """
+    prompt = f"""
+Generate a realistic team meeting transcript (Slack format, 10-15 messages)
+that contains exactly {num_tasks} action items.
+
+After the transcript, output a JSON block:
+{{"ground_truth": ["task 1", "task 2", ...]}}
+
+The tasks should be naturally embedded — not labeled explicitly.
+"""
+    response = ollama.chat(model="mistral", messages=[{"role": "user", "content": prompt}])
+    # parse transcript + ground_truth from response
+    ...
+```
+
+Run the scorer against synthetic data as a regression test every time the extraction prompt changes.
+
+### Human feedback
+
+The Review Queue (Layer 7) lets users mark extracted tasks as correct, incorrect, or edited. Corrections land in a `task_feedback` table and feed back into prompt tuning.
+
+---
+
+## 🖥️ Layer 7 — Frontend
+### *React + Vite. Build in this order.*
+
+---
+
+| Priority | View | Key details |
+|---|---|---|
+| 1 | **DAG Viewer** | React Flow graph, critical path highlighted, bottlenecks in red, click node → task detail |
+| 2 | **Task Board** | Kanban by status, filter by owner / team / deadline |
+| 3 | **Review Queue** | Tasks routed for human review — approve / reject / edit before they propagate |
+| 4 | **Draft Inbox** | Drafted messages waiting for send approval, edit-before-send diff |
+| 5 | **Watcher Status** | Active connectors, last sync time, auth errors |
+| 6 | **Workspace Settings** | Connect apps, manage credentials, set staleness thresholds |
+
+Use **React Flow** for the DAG Viewer. It handles large graphs well and supports custom node renderers.
+
+---
+
+## Recommended build order
+
+### Sprint 1 — Solid foundation
+- [ ] Postgres schema (Layer 0) — all tables, Alembic migration running cleanly
+- [ ] `FileWatcher` + `EmailWatcher` (Layer 1)
+- [ ] Connector base class + registry (Layer 3)
+- [ ] `SlackConnector` + `WebhookConnector` (Layer 3)
+
+### Sprint 2 — Live graph
+- [ ] Persisted DAG in Postgres — merge on extraction, snapshot on diff (Layer 2)
+- [ ] Do-first ranking + staleness detection (Layer 2)
+- [ ] Draft generator — nudge + deadline reminder types (Layer 4)
+- [ ] DAG Viewer with React Flow (Layer 7)
+
+### Sprint 3 — Agent layer
+- [ ] Agent tools + `AgentLoop` (Layer 5)
+- [ ] Slack bot entry point (Layer 5)
+- [ ] MCP server (Layer 5)
+- [ ] Python SDK (`pip install flowstate`)
+
+### Sprint 4 — Intelligence & feedback
+- [ ] Evaluation scorer + synthetic data generator (Layer 6)
+- [ ] Human feedback UI — Review Queue + Task Board (Layer 7)
+- [ ] Learning from draft edits (Layer 4)
+
+### Sprint 5 — Scale & full coverage
+- [ ] All remaining watchers: GitHub, Jira, WhatsApp, Notion, Calendar (Layer 1)
+- [ ] All remaining connectors (Layer 3)
+- [ ] Multi-tenant workspace isolation end-to-end (Layer 0)
+- [ ] Weekly digest connector (Layer 3)
+
+---
+
+## Local setup
 
 ```bash
-# Start Ollama server
-ollama serve
+# Clone
+git clone https://github.com/your-org/flowstate
+cd flowstate
 
-# Pull the Mistral model
-# FIX #7: Using "mistral" consistently throughout
+# Python env
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+
+# Infrastructure
+docker-compose up -d   # Postgres, Redis, ChromaDB
+
+# Migrations
+alembic upgrade head
+
+# Ollama (local LLM)
 ollama pull mistral
 
-# Test the endpoint
-curl http://localhost:11434/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"model": "mistral", "messages": [{"role": "user", "content": "Hello"}]}'
+# Start API
+uvicorn backend.main:app --reload
+
+# Start worker
+python -m flowstate.worker
+
+# Frontend
+cd frontend && npm install && npm run dev
 ```
 
-Validate the response includes the model's reply to your prompt:
-
-```json
-{
-  "model": "mistral",
-  "message": {
-    "role": "assistant",
-    "content": "Hi! How can I help?"
-  }
-}
-```
-
-**Notes:**
-- Ollama runs on `http://localhost:11434` by default.
-- No GPU required — CPU inference works out of the box.
-- Logs are printed to the terminal. Redirect to `logs/ollama.log` if needed:
-  ```bash
-  ollama serve >> logs/ollama.log 2>&1
-  ```
+Copy `.env.example` to `.env` and fill in credentials before starting.
 
 ---
 
-### Phase 1 — Ingestion Layer 🔨 In Progress / Testing
+## Notes for Siya and Srishti
 
-**Goal:** Accept file uploads and push them into an async processing queue.
+- **Layer 0 is the blocker for everything.** Don't start Layer 1 or 3 until the Postgres schema is solid and Alembic is running cleanly. Migrations are cheap to write now, painful to retrofit later.
 
-Build the upload API endpoint:
+- **The idempotency pattern in `automation/trigger.py` is your friend.** Copy it for every connector and watcher. Double-firing a Slack message or creating a duplicate Jira issue is embarrassing. Hash the inputs, check before acting.
 
-```python
-# backend/ingestion/upload.py
-@router.post("/upload")
-async def upload_file(file: UploadFile, team_id: str):
-    # Save raw file to object store
-    # Push job metadata to Redis list
-    # Return job_id
-```
+- **Keep business logic portable.** If a module can't be imported without a running database, it's wrong. The MCP server and SDK path depend on clean separation between `flowstate/infra/` and everything else.
 
-Supported input formats: `.txt` (WhatsApp), `.pdf`, `.docx`, `.png`/`.jpg` (screenshots), `.json` (Discord).
+- **Draft types first, then connectors.** A connector that sends a poorly worded message is worse than no connector. Get nudge + deadline reminder quality right before wiring up delivery.
 
-Test ingestion:
-
-```bash
-curl -X POST http://localhost:8001/upload \
-  -F "file=@sample_chat.txt" \
-  -F "team_id=team_alpha"
-```
-
-<!-- FIX #2: Replaced Celery command with the correct plain Python worker command -->
-
-Start the async job worker:
-
-```bash
-python -m backend.worker
-```
-
-The worker is a plain Python Redis list consumer (`brpop` on `flowstate:jobs`). It does not use Celery.
-
----
-
-### Phase 2 — Multimodal Preprocessing Layer 🔨 In Progress / Testing
-
-**Goal:** Normalize all input types into clean, chunked text with speaker metadata.
-
-Build the content normalizer:
-
-<!-- FIX #5: Updated to reflect actual pytesseract implementation, not LLaVA -->
-
-```python
-# backend/preprocessing/normalizer.py
-
-def normalize(file_path: str, file_type: str) -> list[Chunk]:
-    if file_type == "txt":
-        return chunk_by_speaker(file_path)
-    elif file_type == "pdf":
-        return extract_pdf_text(file_path)
-    elif file_type in ["png", "jpg"]:
-        return extract_image_text(file_path)   # uses pytesseract (Tesseract OCR)
-    elif file_type == "docx":
-        return extract_docx_text(file_path)
-```
-
-For image and screenshot inputs, **Tesseract OCR** (via the `pytesseract` Python wrapper) extracts text from the image. Ensure the system-level Tesseract binary is installed — see [Prerequisites](#prerequisites).
-
-Test preprocessing:
-
-```bash
-python -m backend.preprocessing.normalizer --file sample_screenshot.png
-```
-
----
-
-### Phase 3 — Structured Extraction Engine 🔨 In Progress / Testing
-
-**Goal:** Extract tasks, owners, deadlines, and dependencies from normalised chunks using schema-enforced LLM output.
-
-This is the **core intelligence layer**. We're using strict JSON schema enforcement so the LLM never returns malformed output:
-
-```python
-TASK_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "task":         { "type": "string" },
-        "owner":        { "type": ["string", "null"] },
-        "deadline":     { "type": ["string", "null"] },
-        "dependencies": { "type": "array", "items": { "type": "string" } },
-        "confidence":   { "type": "number" },
-        "source_ref":   { "type": "string" }
-    },
-    "required": ["task", "confidence", "source_ref"]
-}
-```
-
-The system prompt includes few-shot examples covering:
-- Clean task with explicit owner
-- Implicit deadline ("by end of day Friday")
-- Task with dependency chain
-- Task with no owner identified
-
-Test extraction:
-
-```bash
-python -m backend.extraction.extractor --chunk "Rahul can you finish the pitch deck by Thursday evening?"
-# Expected: {task: "Complete pitch deck", owner: "Rahul", deadline: "Thursday evening", confidence: 0.94}
-```
-
----
-
-### Phase 4 — Intelligence Enrichment 🔨 In Progress / Testing
-
-<!-- FIX #4: Updated from "Not Started" to "In Progress / Testing" -->
-
-**Goal:** Fill gaps in extracted data — infer missing owners, normalise deadline formats, detect duplicates.
-
-**Ownership Inference:**
-When `owner == null`, use historical ownership mapping and speaker activity frequency to assign `inferred_owner` with `inference_confidence`.
-
-**Deadline Normalisation:**
-Convert relative times to absolute ISO timestamps:
-
-```python
-"Next Friday" → "2026-03-27T23:59:00+05:30"
-"EOD"         → "2026-03-24T18:00:00+05:30"
-```
-
-**Duplicate Detection:**
-Before inserting a new task, compare its embedding against all existing task embeddings in ChromaDB. If cosine similarity exceeds the threshold AND owner/deadline overlap — flag as duplicate candidate.
-
-```bash
-# Test enrichment pipeline end-to-end
-python -m backend.enrichment.pipeline --task-id <task_id>
-```
-
-Implemented in:
-- `backend/enrichment/pipeline.py` — end-to-end orchestration
-- `backend/enrichment/ownership.py` — owner inference
-- `backend/enrichment/deadlines.py` — deadline normalisation
-- `backend/enrichment/duplicates.py` — duplicate detection
-
----
-
-### Phase 5 — Task Graph Intelligence (DAG Engine) 🔨 In Progress / Testing
-
-<!-- FIX #4: Updated from "Not Started" to "In Progress / Testing" -->
-
-**Goal:** Model tasks as a directed acyclic graph to surface dependencies, bottlenecks, and critical path.
-
-```python
-# backend/graph/dag.py
-import networkx as nx
-
-G = nx.DiGraph()
-G.add_node("task_001", label="Design wireframes", deadline="2026-03-25")
-G.add_node("task_002", label="Build frontend", deadline="2026-03-28")
-G.add_edge("task_001", "task_002")  # frontend depends on wireframes
-
-critical_path = nx.dag_longest_path(G)
-bottlenecks   = [n for n in G.nodes if G.in_degree(n) > 2]
-```
-
-Available functions in `backend/graph/dag.py`:
-- `build_dag()` — construct the graph from stored task/edge data
-- `get_critical_path()` — return the longest dependency chain
-- `get_bottlenecks()` — identify high-in-degree nodes
-- `get_dag_summary()` — return a summary dict for the API
-
-Store graph edges in PostgreSQL (adjacency list) and cache in memory for fast traversal.
-
-Test graph builder:
-
-```bash
-python -m backend.graph.dag --transcript-id <id>
-```
-
----
-
-### Phase 6 — AI Governance Layer ⬜ Not Started
-
-**Goal:** Route low-confidence extractions to a human review queue. Build trust into every task.
-
-```python
-def route_task(task: ExtractedTask):
-    if task.confidence < 0.75 or task.inference_confidence < 0.70 or task.is_duplicate_candidate:
-        send_to_review_queue(task)
-    else:
-        auto_approve(task)
-```
-
-Every task carries:
-- Confidence score (0–1)
-- Source snippet reference (exact chat line)
-- Inference trace (how the owner was determined)
-
-Build the review queue API:
-
-```bash
-GET  /api/review-queue            # List tasks needing human review
-POST /api/review-queue/:id/approve
-POST /api/review-queue/:id/edit
-```
-
----
-
-### Phase 7 — Hybrid Memory Architecture ⬜ Not Started
-
-**Goal:** Persist all data across three complementary stores.
-
-| Store | Technology | What It Stores |
-|-------|-----------|----------------|
-| Structured | PostgreSQL | Tasks, owners, deadlines, graph edges, version history |
-| Vector | ChromaDB | Task embeddings, conversation embeddings, document embeddings |
-| Object | Local FS / S3-compatible | Raw transcripts, uploaded files, OCR outputs |
-
-Verify all three are operational:
-
-```bash
-# PostgreSQL
-psql -h localhost -U flowstate_user -d flowstate -c "\dt"
-
-# ChromaDB
-curl http://localhost:8000/api/v1/heartbeat
-
-# Object store
-ls ./storage/objects/
-```
-
----
-
-### Phase 8 — Automation Layer ⬜ Not Started
-
-**Goal:** Trigger real-world actions idempotently when tasks are approved.
-
-For each approved task with a deadline:
-1. Add event to Google Calendar
-2. Create card on Kanban board
-3. Send reminder notification to owner
-4. Emit event on internal event bus
-
-Idempotency check before every action:
-
-```python
-task_hash = sha256(f"{task_id}:{owner}:{deadline}".encode()).hexdigest()
-if already_processed(task_hash):
-    return  # Skip — already triggered
-```
-
-Test automation:
-
-```bash
-python -m backend.automation.trigger --task-id <id>
-```
-
-Set up Google Calendar credentials:
-
-```bash
-# Place OAuth credentials at:
-./credentials/google_calendar.json
-
-# Run auth flow (first time only)
-python scripts/auth_calendar.py
-```
-
----
-
-### Phase 9 — Dashboard & Visualisation Layer ⬜ Not Started
-
-**Goal:** Build the frontend task board with DAG view and source trust popovers.
-
-```bash
-cd frontend
-npm run dev
-# Opens at http://localhost:3000
-```
-
-Frontend components to build:
-- **Task Board** — AI-generated tasks, editable fields, confidence badge
-- **Dependency Graph** — Cytoscape.js DAG with critical path in red, bottlenecks flagged
-- **Trust Popover** — Click any task → shows extracted source chat snippet + line reference + confidence score
-
-Build the graph view:
-
-```bash
-npm install cytoscape
-```
-
-```javascript
-// DAG view component
-import cytoscape from 'cytoscape';
-// Render nodes (tasks) and edges (dependencies)
-// Color critical path red
-// Flag high-in-degree nodes as bottlenecks
-```
-
----
-
-### Phase 10 — Continuous Learning & Evaluation ⬜ Not Started
-
-**Goal:** Measure extraction quality and improve the system over time.
-
-**Human Feedback Loop:**
-When a user edits an AI-generated task (owner, deadline, wording), store the diff:
-
-```python
-{
-    "original": { "owner": null, "deadline": "Friday" },
-    "edited":   { "owner": "Siya", "deadline": "2026-03-27T17:00:00" },
-    "task_id": "task_042"
-}
-```
-
-Use diffs to refine system prompts and recalibrate confidence thresholds.
-
-**Synthetic Dataset Generator:**
-
-```bash
-python scripts/synthetic_gen.py --count 200 --output data/synthetic_hackathon.json
-```
-
-Generates simulated chat transcripts with known ground-truth tasks.
-
-**Evaluation:**
-
-```bash
-python scripts/eval.py --dataset data/synthetic_hackathon.json
-```
-
-Outputs:
-
-```
-Precision: 0.941
-Recall:    0.928
-F1 Score:  0.934
-```
-
-Target: **F1 ≥ 0.90** before final submission.
-
----
-
-### Phase 11 — Containerised Deployment ⬜ Not Started
-
-**Goal:** Package the entire system into a one-command deployable stack.
-
-Build all Docker images:
-
-```bash
-docker-compose -f docker/docker-compose.yml build
-```
-
-Start everything:
-
-```bash
-docker-compose -f docker/docker-compose.yml up
-```
-
-Services started:
-
-| Service | Port | Description |
-|---------|------|-------------|
-| Backend API | 8001 | FastAPI app |
-| Frontend | 3000 | React dashboard |
-| PostgreSQL | 5432 | Structured DB |
-| ChromaDB | 8000 | Vector store |
-| Redis | 6379 | Queue |
-| Ollama | 11434 | LLM inference |
-
-Full teardown:
-
-```bash
-docker-compose -f docker/docker-compose.yml down -v
-```
-
----
-
-## ▶️ Running the System
-
-Once all phases are built:
-
-```bash
-# 1. Start infrastructure
-docker-compose -f docker/docker-compose.yml up -d postgres chromadb redis
-
-# 2. Start inference runtime
-ollama serve
-
-# 3. Start backend
-uvicorn backend.api.main:app --host 0.0.0.0 --port 8001 --reload
-
-# 4. Start async job worker
-# FIX #2: Correct command — worker.py uses plain Python Redis (brpop), not Celery
-python -m backend.worker
-
-# 5. Start frontend
-cd frontend && npm run dev
-```
-
-Visit `http://localhost:3000` to use the dashboard.
-
----
-
-## 🧪 Testing & Evaluation
-
-<!-- FIX #10: Added reference to testing.md -->
-
-See [testing.md](./testing.md) for the full testing guide.
-
-```bash
-# Run extraction accuracy eval
-python scripts/eval.py --dataset data/synthetic_hackathon.json
-
-# Test a single file end-to-end
-curl -X POST http://localhost:8001/upload \
-  -F "file=@tests/fixtures/sample_whatsapp.txt" \
-  -F "team_id=test_team"
-```
-
----
-
-## 🐳 Deployment
-
-For demo deployment:
-
-```bash
-# One-command deploy
-docker-compose -f docker/docker-compose.yml up --build
-
-# Check logs
-docker-compose -f docker/docker-compose.yml logs -f backend
-```
-
-No cloud dependency required — runs entirely locally.
-
----
-
-## 📊 Current Progress
-
-<!-- FIX #4: Updated Phase 4 and Phase 5 to reflect actual implementation status -->
-
-| Phase | Status | Notes |
-|-------|--------|-------|
-| Phase 0 — Inference Runtime | 🔨 In Progress / Testing | Ollama running, model validation underway |
-| Phase 1 — Ingestion Layer | 🔨 In Progress / Testing | Upload API live, Redis queue being tested |
-| Phase 2 — Preprocessing | 🔨 In Progress / Testing | Text + PDF working, image OCR via pytesseract in testing |
-| Phase 3 — Extraction Engine | 🔨 In Progress / Testing | Schema enforcement + few-shot prompts in testing |
-| Phase 4 — Enrichment | 🔨 In Progress / Testing | pipeline.py, ownership.py, deadlines.py, duplicates.py implemented |
-| Phase 5 — DAG Engine | 🔨 In Progress / Testing | dag.py implemented with build, critical path, bottleneck, summary functions |
-| Phase 6 — Governance | 🔨 In Progress / Testing | |
-| Phase 7 — Memory Architecture | 🔨 In Progress / Testing | |
-| Phase 8 — Automation | 🔨 In Progress / Testing | |
-| Phase 9 — Dashboard | ⬜ Not Started | |
-| Phase 10 — Evaluation | 🔨 In Progress / Testing | |
-| Phase 11 — Deployment | ⬜ Not Started | |
-
----
-
-## 🗺️ Roadmap — Post Phase 11
-
-Once all phases are complete and stable on Ollama, we plan to explore:
-
-- **Lemonade integration** — AMD's hybrid NPU/iGPU/CPU inference runtime as a drop-in performance layer over the existing Ollama-compatible API
-- **Model benchmarking** — Compare latency and throughput between Ollama and Lemonade on equivalent hardware
-- **Selective offloading** — Route high-frequency extraction tasks to Lemonade while keeping Ollama as fallback
-
----
-
-## 🐛 Known Issues
-
-- Image OCR (Phase 2) uses Tesseract via `pytesseract`. On CPU without GPU acceleration, processing large screenshots may be slow.
-- The `/enrich` API endpoint is defined in `backend/api/enrichment.py` but is not yet mounted in `backend/api/main.py`. It will not respond until the router is registered.
-- Google Calendar integration requires manual OAuth setup (one-time).
-- Redis backpressure not yet handled for large batch uploads.
-
----
-
-## 📎 References
-
-- [Ollama](https://ollama.ai)
-- [ChromaDB](https://docs.trychroma.com)
-- [Sentence Transformers](https://www.sbert.net)
-- [Cytoscape.js](https://js.cytoscape.org)
-- [FastAPI](https://fastapi.tiangolo.com)
-- [NetworkX DAG Docs](https://networkx.org/documentation/stable/reference/algorithms/dag.html)
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)
-- [pytesseract](https://github.com/madmaze/pytesseract)
+- **Measure extraction quality from day one.** Write the scorer before you start tuning prompts. Otherwise you're flying blind. Synthetic data is cheap to generate and catches regressions fast.
