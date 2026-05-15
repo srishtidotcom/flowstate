@@ -11,3 +11,7 @@ storage/
 credentials/
 *.pickle
 *.json
+venv/
+__pycache__/
+.env
+storage/
