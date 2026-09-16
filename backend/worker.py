@@ -31,6 +31,7 @@ def process_job(
 ) -> ActivityPersistenceResult:
     """Run one claimed upload through deterministic boundaries."""
     chunks = list(normalizer(job["file_path"], job["file_type"]))
+    _bind_original_filename(chunks, job["filename"])
     extracted = list(extractor(chunks))
 
     tasks = []
@@ -119,6 +120,16 @@ def _default_vector_store(tasks: list[Task], embeddings: list[list[float]]) -> N
     from backend.vector_db import store_tasks_batch
 
     store_tasks_batch(tasks, embeddings)
+
+
+def _bind_original_filename(chunks: list[Any], filename: str) -> None:
+    """Replace object-store names while preserving exact source locators."""
+    for chunk in chunks:
+        source_ref = getattr(chunk, "source_ref", "")
+        if not source_ref:
+            continue
+        _, separator, locator = source_ref.partition(":")
+        chunk.source_ref = f"{filename}:{locator}" if separator else filename
 
 
 if __name__ == "__main__":
