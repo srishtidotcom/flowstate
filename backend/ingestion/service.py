@@ -1,6 +1,7 @@
 """Upload job registration and queue dispatch."""
 
 import json
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from backend.db.database import get_db
@@ -8,14 +9,22 @@ from backend.db.repositories import (
     add_job,
     claim_queued_job,
     complete_job,
+    commitment_from_record,
+    event_from_record,
+    find_commitment,
+    find_event,
     find_job,
+    graph_edge_from_record,
     job_from_record,
     mark_job_enqueued,
     mark_job_enqueue_failed,
     prepare_failed_job_retry,
+    list_graph_edges,
+    list_tasks_for_commitment,
+    task_from_record,
     update_job_status,
 )
-from backend.models import Job
+from backend.models import Commitment, Event, GraphEdge, Job, Task
 
 
 QUEUE_NAME = "flowstate:jobs"
@@ -28,6 +37,19 @@ redis.call('LPUSH', KEYS[2], ARGV[2])
 redis.call('SADD', KEYS[1], ARGV[1])
 return 1
 """
+
+
+class JobNotCompletedError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class JobResults:
+    job: Job
+    event: Event
+    commitment: Commitment
+    tasks: list[Task]
+    edges: list[GraphEdge]
 
 
 def enqueue_upload_job(job: Job, queue: Any) -> bool:
@@ -72,6 +94,35 @@ def get_job(job_id: str, team_id: str) -> Optional[Job]:
     with get_db() as db:
         record = find_job(db, job_id, team_id)
         return job_from_record(record) if record else None
+
+
+def get_job_results(job_id: str, team_id: str) -> Optional[JobResults]:
+    with get_db() as db:
+        record = find_job(db, job_id, team_id)
+        if record is None:
+            return None
+        job = job_from_record(record)
+        if (
+            job.status != "completed"
+            or not job.result_event_id
+            or not job.result_commitment_id
+        ):
+            raise JobNotCompletedError(f"Job {job_id} is not completed")
+
+        event_record = find_event(db, job.result_event_id, team_id)
+        commitment_record = find_commitment(db, job.result_commitment_id, team_id)
+        if event_record is None or commitment_record is None:
+            raise RuntimeError(f"Completed job {job_id} has missing result records")
+        task_records = list_tasks_for_commitment(db, commitment_record.id, team_id)
+        node_ids = [event_record.id, commitment_record.id, *(item.id for item in task_records)]
+        edge_records = list_graph_edges(db, team_id, node_ids)
+        return JobResults(
+            job=job,
+            event=event_from_record(event_record),
+            commitment=commitment_from_record(commitment_record),
+            tasks=[task_from_record(item) for item in task_records],
+            edges=[graph_edge_from_record(item) for item in edge_records],
+        )
 
 
 def set_job_status(

@@ -11,9 +11,10 @@ from backend.db.orm import (
     EventRecord,
     GraphEdgeRecord,
     JobRecord,
+    ReviewDecisionRecord,
     TaskRecord,
 )
-from backend.models import Commitment, Event, GraphEdge, Job, Task
+from backend.models import Commitment, Event, GraphEdge, Job, ReviewDecision, Task
 
 
 def add_event(db: Session, event: Event) -> EventRecord:
@@ -363,6 +364,99 @@ def soft_delete_task(db: Session, task_id: str, team_id: str) -> bool:
     result = db.execute(statement)
     db.flush()
     return result.rowcount == 1
+
+
+def find_task_record(db: Session, task_id: str, team_id: str) -> Optional[TaskRecord]:
+    statement = select(TaskRecord).where(
+        TaskRecord.id == task_id,
+        TaskRecord.team_id == team_id,
+        TaskRecord.deleted_at.is_(None),
+    )
+    return db.execute(statement).scalar_one_or_none()
+
+
+def list_review_task_records(db: Session, team_id: str) -> List[TaskRecord]:
+    statement = (
+        select(TaskRecord)
+        .where(
+            TaskRecord.team_id == team_id,
+            TaskRecord.status == "pending_review",
+            TaskRecord.deleted_at.is_(None),
+        )
+        .order_by(TaskRecord.created_at, TaskRecord.id)
+    )
+    return list(db.execute(statement).scalars())
+
+
+def update_task_status(
+    db: Session,
+    task_id: str,
+    team_id: str,
+    status: str,
+) -> Optional[TaskRecord]:
+    record = find_task_record(db, task_id, team_id)
+    if record is None:
+        return None
+    record.status = status
+    record.updated_at = datetime.now(timezone.utc)
+    db.flush()
+    return record
+
+
+def add_review_decision(
+    db: Session,
+    decision: ReviewDecision,
+) -> ReviewDecisionRecord:
+    record = ReviewDecisionRecord(
+        id=decision.id,
+        team_id=decision.team_id,
+        task_id=decision.task_id,
+        reviewer_id=decision.reviewer_id,
+        decision=decision.decision,
+        reason=decision.reason,
+        created_at=decision.created_at,
+    )
+    db.add(record)
+    db.flush()
+    return record
+
+
+def find_review_decision(
+    db: Session,
+    task_id: str,
+    team_id: str,
+) -> Optional[ReviewDecisionRecord]:
+    statement = select(ReviewDecisionRecord).where(
+        ReviewDecisionRecord.task_id == task_id,
+        ReviewDecisionRecord.team_id == team_id,
+    )
+    return db.execute(statement).scalar_one_or_none()
+
+
+def review_decision_from_record(record: ReviewDecisionRecord) -> ReviewDecision:
+    return ReviewDecision(
+        id=record.id,
+        team_id=record.team_id,
+        task_id=record.task_id,
+        reviewer_id=record.reviewer_id,
+        decision=record.decision,
+        reason=record.reason,
+        created_at=record.created_at,
+    )
+
+
+def list_execution_candidate_records(db: Session, team_id: str) -> List[TaskRecord]:
+    statement = (
+        select(TaskRecord)
+        .where(
+            TaskRecord.team_id == team_id,
+            TaskRecord.status == "approved",
+            TaskRecord.deadline.isnot(None),
+            TaskRecord.deleted_at.is_(None),
+        )
+        .order_by(TaskRecord.deadline, TaskRecord.id)
+    )
+    return list(db.execute(statement).scalars())
 
 
 def get_task_by_id(db: Session, task_id: str, team_id: str) -> Optional[Task]:
