@@ -1,114 +1,125 @@
+"""Redis worker orchestration for the durable upload pipeline."""
+
 import json
-import redis
 import os
-import time
-import uuid
-from backend.ml import model
-from backend.preprocessing.normalizer import normalize
-from backend.extraction.extractor import extract_tasks
+from typing import Any, Callable, Iterable
+
+import redis
+
+from backend.core.activity.engine import ActivityPersistenceResult, persist_extracted_activity
 from backend.enrichment.pipeline import enrich_task
-from backend.graph.dag import get_dag_summary
-from backend.vector_db import store_tasks_batch
+from backend.extraction.extractor import extract_tasks
+from backend.governance.router import classify_tasks
+from backend.ingestion.service import claim_job, mark_job_completed, set_job_status
 from backend.models import Task
-from backend.governance.router import route_tasks
-from backend.automation.trigger import trigger_approved_tasks
+from backend.preprocessing.normalizer import normalize
+
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+QUEUE_NAME = "flowstate:jobs"
 r = redis.from_url(REDIS_URL)
 
-print("[worker] Warming up model...")
-_warmup_t0 = time.perf_counter()
-model.encode(["warmup"], show_progress_bar=False)
-print(f"[worker] Model warmup complete in {time.perf_counter() - _warmup_t0:.2f}s")
 
-def process_job(job: dict):
-    print(f"\nProcessing job: {job['job_id']}")
+def process_job(
+    job: dict,
+    *,
+    normalizer: Callable[[str, str], Iterable[Any]] = normalize,
+    extractor: Callable[[list[Any]], Iterable[Any]] = extract_tasks,
+    enricher: Callable[[Task, str], Task] = enrich_task,
+    embedder: Callable[[list[str]], list[list[float]]] | None = None,
+    vector_store: Callable[[list[Task], list[list[float]]], None] | None = None,
+) -> ActivityPersistenceResult:
+    """Run one claimed upload through deterministic boundaries."""
+    chunks = list(normalizer(job["file_path"], job["file_type"]))
+    extracted = list(extractor(chunks))
 
-    # Phase 2 — Normalize
-    print("Phase 2: Normalizing...")
-    _t0 = time.perf_counter()
-    chunks = normalize(job["file_path"], job["file_type"])
-    print(f"Phase 2 done in {time.perf_counter() - _t0:.2f}s — got {len(chunks)} chunks")
-
-    # Phase 3 — Extract tasks
-    print("Phase 3: Sending to Mistral... (this may take 1-2 mins)")
-    _t0 = time.perf_counter()
-    tasks = extract_tasks(chunks)
-    print(f"Phase 3 done in {time.perf_counter() - _t0:.2f}s — extracted {len(tasks)} tasks")
-
-    # Phase 4a — Enrich
-    print("Phase 4a: Enriching tasks...")
-    _t0 = time.perf_counter()
-    enriched_tasks = []
-    for task in tasks:
-        owner = task.owner
+    tasks = []
+    for item in extracted:
+        owner = item.owner
         if isinstance(owner, list):
             owner = ", ".join(owner)
-
-        t = Task(
-            task_id=str(uuid.uuid4()),
-            task=task.title,
+        task = Task(
+            description=item.title,
             owner=owner,
-            deadline=task.deadline,
-            confidence=task.confidence,
-            source_ref=job["filename"],
+            deadline=item.deadline,
+            confidence=item.confidence,
+            source_ref=getattr(item, "source_ref", None) or job["filename"],
+            source_snippet=getattr(item, "source_snippet", None),
             team_id=job["team_id"],
-            dependencies=task.dependencies if task.dependencies else []
+            dependencies=list(item.dependencies or []),
         )
+        tasks.append(enricher(task, job["team_id"]))
 
-        enriched = enrich_task(t, job["team_id"])
-        enriched_tasks.append(enriched)
-        print(f"  ✅ {enriched.task} | owner: {enriched.owner or enriched.inferred_owner} | deadline: {enriched.deadline}")
-    print(f"Phase 4a done in {time.perf_counter() - _t0:.2f}s")
+    routing = classify_tasks(tasks)
+    for task in routing["approved"]:
+        task.status = "approved"
+    for task in routing["review"]:
+        task.status = "pending_review"
 
-    # Phase 4b — Batch encode
-    print("Phase 4b: Batch encoding embeddings...")
-    _t0 = time.perf_counter()
-    if enriched_tasks:
-        texts = [t.task for t in enriched_tasks]
-        embeddings = model.encode(texts, show_progress_bar=False).tolist()
-        print(f"Phase 4b done in {time.perf_counter() - _t0:.2f}s")
+    persisted = persist_extracted_activity(job, chunks, tasks)
 
-        # Phase 4c — Batch store
-        print("Phase 4c: Batch storing in ChromaDB...")
-        _t0 = time.perf_counter()
-        store_tasks_batch(enriched_tasks, embeddings)
-        print(f"Phase 4c done in {time.perf_counter() - _t0:.2f}s")
-    else:
-        print("Phase 4b/4c skipped — no tasks")
+    if persisted.tasks:
+        encode = embedder or _default_embedder
+        store = vector_store or _default_vector_store
+        embeddings = encode([task.description for task in persisted.tasks])
+        store(persisted.tasks, embeddings)
 
-    # Phase 5 — Build DAG
-    print("Phase 5: Building DAG...")
-    _t0 = time.perf_counter()
-    dag_summary = get_dag_summary(enriched_tasks)
-    print(f"Phase 5 done in {time.perf_counter() - _t0:.2f}s")
-    print(f"\nDAG Summary:")
-    print(f"  Total tasks: {dag_summary['total_tasks']}")
-    print(f"  Critical path: {dag_summary['critical_path']}")
-    print(f"  Bottlenecks: {dag_summary['bottlenecks']}")
+    return persisted
 
-    # Phase 6 — Governance
-    print("Phase 6: Routing tasks...")
-    routing = route_tasks(enriched_tasks)
-    print(f"   Auto-approved: {len(routing['approved'])} tasks")
-    print(f"   Needs review: {len(routing['review'])} tasks")
-    for t in routing['review']:
-        print(f"    - {t}")
 
-    # Phase 8 — Automation
-    print("Phase 8: Triggering calendar events...")
-    approved_tasks = [t for t in enriched_tasks if t.deadline]
-    trigger_approved_tasks(approved_tasks)
+def process_queued_job(
+    job: dict,
+    *,
+    processor: Callable[[dict], ActivityPersistenceResult] = process_job,
+) -> ActivityPersistenceResult:
+    """Claim once, record failures, and complete one durable job."""
+    job_id = job.get("job_id")
+    team_id = job.get("team_id")
+    if not job_id or not team_id:
+        raise ValueError("Queued job must include job_id and team_id")
 
-    print("\n✅ Job complete!")
-    return enriched_tasks
+    if not claim_job(job_id, team_id):
+        raise ValueError(f"Job {job_id} is missing or has already been claimed")
+    try:
+        if job.get("type") != "process_upload":
+            raise ValueError(f"Unsupported job type: {job.get('type')!r}")
+        result = processor(job)
+    except Exception as exc:
+        set_job_status(job_id, team_id, "failed", str(exc))
+        raise
 
-def run_worker():
+    if not mark_job_completed(
+        job_id,
+        team_id,
+        result.event.id,
+        result.commitment.id,
+    ):
+        raise RuntimeError(f"Could not complete job {job_id}")
+    return result
+
+
+def run_worker(queue: Any = r) -> None:
     print("Worker is listening for jobs...")
     while True:
-        _, data = r.brpop("flowstate:jobs")
-        job = json.loads(data)
-        process_job(job)
+        _, data = queue.brpop(QUEUE_NAME)
+        try:
+            job = json.loads(data)
+            process_queued_job(job)
+        except Exception as exc:
+            print(f"[worker] Job failed: {exc}")
+
+
+def _default_embedder(texts: list[str]) -> list[list[float]]:
+    from backend.ml import model
+
+    return model.encode(texts, show_progress_bar=False).tolist()
+
+
+def _default_vector_store(tasks: list[Task], embeddings: list[list[float]]) -> None:
+    from backend.vector_db import store_tasks_batch
+
+    store_tasks_batch(tasks, embeddings)
+
 
 if __name__ == "__main__":
     run_worker()

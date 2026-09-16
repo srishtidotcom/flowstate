@@ -127,6 +127,10 @@ class Job(SerializableDomain):
     file_path: Optional[str] = None
     file_type: Optional[str] = None
     error: Optional[str] = None
+    attempt_count: int = 0
+    queue_published_at: Optional[datetime] = None
+    result_event_id: Optional[str] = None
+    result_commitment_id: Optional[str] = None
     created_at: datetime = field(default_factory=utc_now)
     updated_at: datetime = field(default_factory=utc_now)
     started_at: Optional[datetime] = None
@@ -138,6 +142,7 @@ class ReviewDecision(SerializableDomain):
     task_id: str
     decision: str
     reviewer_id: str
+    team_id: str
     id: str = field(default_factory=lambda: str(uuid4()))
     reason: Optional[str] = None
     created_at: datetime = field(default_factory=utc_now)

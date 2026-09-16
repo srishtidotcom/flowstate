@@ -1,7 +1,5 @@
 from typing import Optional, List
 from backend.models import Task
-from backend.vector_db import query_similar_tasks
-from backend.ml import model
 
 def detect_duplicates(task: Task, team_id: str, similarity_threshold: float = 0.92) -> Optional[List[Task]]:
     """
@@ -10,6 +8,11 @@ def detect_duplicates(task: Task, team_id: str, similarity_threshold: float = 0.
     """
     if not task.description:
         return None
+
+    # Keep model/vector initialization lazy so deterministic tests and API
+    # imports never contact external services.
+    from backend.ml import model
+    from backend.vector_db import query_similar_tasks
 
     # Generate embedding for the new task
     embedding = model.encode(task.description).tolist()

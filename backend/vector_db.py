@@ -13,10 +13,9 @@ from backend.models import Task
 CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
 CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
 
-client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
-
 @lru_cache(maxsize=128)
 def get_or_create_collection(team_id: str):
+    client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
     return client.get_or_create_collection(name=f"tasks_{team_id}")
 
 def store_task(task: Task, embedding: List[float]):

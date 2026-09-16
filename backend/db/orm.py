@@ -6,8 +6,10 @@ from sqlalchemy import (
     JSON,
     Column,
     DateTime,
+    CheckConstraint,
     Float,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -55,6 +57,9 @@ class CommitmentRecord(Timestamped, Base):
 
 class TaskRecord(Timestamped, Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_tasks_confidence"),
+    )
 
     id = Column(String(36), primary_key=True)
     team_id = Column(String(128), nullable=False, index=True)
@@ -77,6 +82,7 @@ class GraphEdgeRecord(Base):
     __tablename__ = "graph_edges"
     __table_args__ = (
         UniqueConstraint(
+            "team_id",
             "source_id",
             "target_id",
             "relationship_type",
@@ -104,6 +110,10 @@ class JobRecord(Base):
     file_path = Column(String(2048), nullable=True)
     file_type = Column(String(32), nullable=True)
     error = Column(Text, nullable=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    queue_published_at = Column(DateTime(timezone=True), nullable=True)
+    result_event_id = Column(String(36), nullable=True)
+    result_commitment_id = Column(String(36), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
     started_at = Column(DateTime(timezone=True), nullable=True)
@@ -112,8 +122,13 @@ class JobRecord(Base):
 
 class ReviewDecisionRecord(Base):
     __tablename__ = "review_decisions"
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_review_decisions_task_id"),
+        CheckConstraint("decision IN ('approved', 'rejected')", name="ck_review_decision"),
+    )
 
     id = Column(String(36), primary_key=True)
+    team_id = Column(String(128), nullable=False, index=True)
     task_id = Column(String(36), ForeignKey("tasks.id"), nullable=False, index=True)
     reviewer_id = Column(String(128), nullable=False)
     decision = Column(String(32), nullable=False)
