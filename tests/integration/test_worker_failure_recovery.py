@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 import backend.worker as worker
 from backend.db.orm import CommitmentRecord, EventRecord, GraphEdgeRecord, TaskRecord
 from backend.extraction.extractor import ExtractedTask
+from backend.extraction.extractor import ExtractionError
 from backend.ingestion.service import (
     enqueue_upload_job,
     get_job,
@@ -109,3 +110,44 @@ def test_unknown_job_type_is_persisted_as_failed(isolated_db, controlled_queue):
     assert failed is not None
     assert failed.status == "failed"
     assert "Unsupported job type" in failed.error
+
+
+def test_extraction_failure_persists_no_downstream_activity(
+    isolated_db,
+    controlled_queue,
+):
+    job = Job(
+        id="extract-failure",
+        type="process_upload",
+        team_id="team-alpha",
+        filename="chat.txt",
+        file_path="/objects/chat.txt",
+        file_type=".txt",
+    )
+    enqueue_upload_job(job, controlled_queue)
+
+    def processor(queued):
+        return worker.process_job(
+            queued,
+            normalizer=lambda path, file_type: [
+                Chunk(text="Broken extraction", source_ref="chat.txt:1")
+            ],
+            extractor=lambda chunks: (_ for _ in ()).throw(
+                ExtractionError("schema violation")
+            ),
+            enricher=lambda task, team_id: task,
+        )
+
+    try:
+        worker.process_queued_job(controlled_queue.pop_job(), processor=processor)
+    except ExtractionError as exc:
+        assert str(exc) == "schema violation"
+    else:
+        raise AssertionError("extraction failure should propagate")
+
+    failed = get_job(job.id, job.team_id)
+    assert failed is not None
+    assert failed.status == "failed"
+    with Session(isolated_db) as db:
+        for record in (EventRecord, CommitmentRecord, TaskRecord, GraphEdgeRecord):
+            assert db.execute(select(func.count()).select_from(record)).scalar_one() == 0

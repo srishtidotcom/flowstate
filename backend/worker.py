@@ -85,17 +85,16 @@ def process_queued_job(
         if job.get("type") != "process_upload":
             raise ValueError(f"Unsupported job type: {job.get('type')!r}")
         result = processor(job)
+        if not mark_job_completed(
+            job_id,
+            team_id,
+            result.event.id,
+            result.commitment.id,
+        ):
+            raise RuntimeError(f"Could not complete job {job_id}")
     except Exception as exc:
         set_job_status(job_id, team_id, "failed", str(exc))
         raise
-
-    if not mark_job_completed(
-        job_id,
-        team_id,
-        result.event.id,
-        result.commitment.id,
-    ):
-        raise RuntimeError(f"Could not complete job {job_id}")
     return result
 
 

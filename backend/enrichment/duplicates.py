@@ -1,7 +1,16 @@
+import os
 from typing import Optional, List
 from backend.models import Task
 
-def detect_duplicates(task: Task, team_id: str, similarity_threshold: float = 0.92) -> Optional[List[Task]]:
+
+DUPLICATE_THRESHOLD = float(os.getenv("DUPLICATE_SIMILARITY_THRESHOLD", "0.85"))
+
+
+def detect_duplicates(
+    task: Task,
+    team_id: str,
+    similarity_threshold: float = DUPLICATE_THRESHOLD,
+) -> Optional[List[Task]]:
     """
     Detect duplicate tasks by comparing embeddings in ChromaDB.
     Returns list of potential duplicates if similarity > threshold.

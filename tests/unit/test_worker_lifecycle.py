@@ -75,3 +75,20 @@ def test_second_claim_is_rejected(monkeypatch):
 
     with pytest.raises(ValueError, match="already been claimed"):
         worker.process_queued_job(_job())
+
+
+def test_completion_failure_is_recorded(monkeypatch):
+    statuses = []
+    monkeypatch.setattr(worker, "claim_job", lambda job_id, team_id: True)
+    monkeypatch.setattr(worker, "mark_job_completed", lambda *args: False)
+    monkeypatch.setattr(
+        worker,
+        "set_job_status",
+        lambda job_id, team_id, status, error=None: statuses.append((status, error)),
+    )
+    result = StubResult(StubEntity("event-1"), StubEntity("commitment-1"))
+
+    with pytest.raises(RuntimeError, match="Could not complete"):
+        worker.process_queued_job(_job(), processor=lambda job: result)
+
+    assert statuses == [("failed", "Could not complete job job-1")]
