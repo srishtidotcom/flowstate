@@ -420,7 +420,7 @@ related_to    inferred_from
 
 ---
 
-### Phase 1 — Project Foundation ⬜ Not Started
+### Phase 1 — Project Foundation 🔨 In Progress
 
 **Goal:** Deploy an empty application skeleton end-to-end.
 
@@ -1214,10 +1214,10 @@ No cloud dependency required — runs entirely locally.
 | Phase | Status | Notes |
 |-------|--------|-------|
 | Phase 0 — Architecture Spec | ⬜ Not Started | PRD, EDD, domain model, sequence diagrams |
-| Phase 1 — Foundation | ⬜ Not Started | Skeleton, CI/CD, auth, migrations |
+| Phase 1 — Foundation | 🔨 In Progress | Canonical domain types, initial schema, durable job lifecycle; CI and auth remain |
 | Phase 2 — Connector Layer | ⬜ Not Started | OpenClaw adapter, event normalisation |
 | Phase 3 — Ingestion & Preprocessing | 🔨 In Progress | Upload API, Redis worker, multimodal normaliser |
-| Phase 4 — Activity Engine | 🔨 In Progress | Extraction, enrichment, deduplication |
+| Phase 4 — Activity Engine | 🔨 In Progress | Transactional Event, Commitment, Task, and provenance-edge persistence; extraction hardening remains |
 | Phase 5 — Graph Engine | 🔨 In Progress | DAG, critical path, bottlenecks |
 | Phase 6 — Memory Engine | ⬜ Not Started | ChromaDB, semantic retrieval, provenance |
 | Phase 7 — User Model Engine | ⬜ Not Started | Preferences, tone, learning |

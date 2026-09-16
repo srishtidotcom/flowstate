@@ -1,18 +1,30 @@
+import os
 from typing import Optional, List
 from backend.models import Task
-from backend.vector_db import query_similar_tasks
-from backend.ml import model
 
-def detect_duplicates(task: Task, team_id: str, similarity_threshold: float = 0.92) -> Optional[List[Task]]:
+
+DUPLICATE_THRESHOLD = float(os.getenv("DUPLICATE_SIMILARITY_THRESHOLD", "0.85"))
+
+
+def detect_duplicates(
+    task: Task,
+    team_id: str,
+    similarity_threshold: float = DUPLICATE_THRESHOLD,
+) -> Optional[List[Task]]:
     """
     Detect duplicate tasks by comparing embeddings in ChromaDB.
     Returns list of potential duplicates if similarity > threshold.
     """
-    if not task.task:
+    if not task.description:
         return None
 
+    # Keep model/vector initialization lazy so deterministic tests and API
+    # imports never contact external services.
+    from backend.ml import model
+    from backend.vector_db import query_similar_tasks
+
     # Generate embedding for the new task
-    embedding = model.encode(task.task).tolist()
+    embedding = model.encode(task.description).tolist()
 
     # Query ChromaDB for similar tasks
     results = query_similar_tasks(team_id, embedding, top_k=3)

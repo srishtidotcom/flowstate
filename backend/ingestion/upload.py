@@ -1,8 +1,10 @@
 import uuid
 import os
 import redis
-import json
-from fastapi import APIRouter, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+
+from backend.ingestion.service import enqueue_upload_job
+from backend.models import Job
 
 router = APIRouter()
 
@@ -16,9 +18,10 @@ ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".png", ".jpg", ".json"}
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...), team_id: str = Form(...)):
     # Validate file type
-    ext = os.path.splitext(file.filename)[1].lower()
+    filename = file.filename or "upload"
+    ext = os.path.splitext(filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
-        return {"error": f"Unsupported file type: {ext}"}
+        raise HTTPException(status_code=415, detail=f"Unsupported file type: {ext}")
 
     # Save file to object store
     job_id = str(uuid.uuid4())
@@ -30,13 +33,17 @@ async def upload_file(file: UploadFile = File(...), team_id: str = Form(...)):
         f.write(content)
 
     # Push job to Redis queue
-    job = {
-        "job_id": job_id,
-        "team_id": team_id,
-        "filename": file.filename,
-        "file_path": save_path,
-        "file_type": ext
-    }
-    r.lpush("flowstate:jobs", json.dumps(job))
+    job = Job(
+        id=job_id,
+        type="process_upload",
+        team_id=team_id,
+        filename=filename,
+        file_path=save_path,
+        file_type=ext,
+    )
+    try:
+        enqueue_upload_job(job, r)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Could not queue upload") from exc
 
-    return {"job_id": job_id, "status": "queued", "filename": file.filename}
+    return {"job_id": job_id, "status": "queued", "filename": filename}
