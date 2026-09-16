@@ -1,0 +1,12 @@
+{
+  "id": "flowstate-bridge",
+  "name": "Flowstate inbound bridge",
+  "description": "Forwards accepted inbound WhatsApp text hooks to local Flowstate.",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false
+  }
+}

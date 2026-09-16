@@ -13,3 +13,6 @@ storage/
 credentials/
 *.pickle
 *.json
+!backend/infrastructure/connectors/openclaw/plugin/package.json
+!backend/infrastructure/connectors/openclaw/plugin/openclaw.plugin.json
+!tests/fixtures/openclaw_whatsapp_event.json
