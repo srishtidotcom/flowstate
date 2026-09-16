@@ -1,3 +1,9 @@
+"""Legacy ChromaDB adapter pending migration into the Memory Engine phase.
+
+Phase 1 keeps this module as a replaceable derived-index boundary. PostgreSQL
+remains the source of truth for processing and governance state.
+"""
+
 import chromadb
 import os
 from functools import lru_cache
@@ -17,9 +23,9 @@ def store_task(task: Task, embedding: List[float]):
     """Store a task and its embedding in ChromaDB."""
     collection = get_or_create_collection(task.team_id)
     collection.upsert(
-        ids=[task.task_id or task.task],
+        ids=[task.id],
         embeddings=[embedding],
-        documents=[task.task],
+        documents=[task.description],
         metadatas=[{
             "owner": task.owner or "",
             "deadline": task.deadline or "",
@@ -42,9 +48,9 @@ def store_tasks_batch(tasks: List[Task], embeddings: List[List[float]]):
     for team_id, items in groups.items():
         collection = get_or_create_collection(team_id)
         collection.upsert(
-            ids=[t.task_id or t.task for t, _ in items],
+            ids=[t.id for t, _ in items],
             embeddings=[emb for _, emb in items],
-            documents=[t.task for t, _ in items],
+            documents=[t.description for t, _ in items],
             metadatas=[{
                 "owner": t.owner or "",
                 "deadline": t.deadline or "",

@@ -8,11 +8,11 @@ def detect_duplicates(task: Task, team_id: str, similarity_threshold: float = 0.
     Detect duplicate tasks by comparing embeddings in ChromaDB.
     Returns list of potential duplicates if similarity > threshold.
     """
-    if not task.task:
+    if not task.description:
         return None
 
     # Generate embedding for the new task
-    embedding = model.encode(task.task).tolist()
+    embedding = model.encode(task.description).tolist()
 
     # Query ChromaDB for similar tasks
     results = query_similar_tasks(team_id, embedding, top_k=3)

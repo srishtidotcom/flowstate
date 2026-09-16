@@ -1,7 +1,7 @@
-from typing import Dict, Optional
 from backend.models import Task
 from backend.enrichment import infer_owner, normalize_deadline, detect_duplicates
-from backend.db import get_task_by_id
+from backend.db.database import get_db
+from backend.db.repositories import get_task_by_id
 
 def enrich_task(task: Task, team_id: str) -> Task:
     """
@@ -33,9 +33,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Fetch task from DB
-    task = get_task_by_id(args.task_id)
+    team_id = input("Team ID: ").strip()
+    with get_db() as db:
+        task = get_task_by_id(db, args.task_id, team_id)
     if task:
         enriched_task = enrich_task(task, task.team_id)
-        print(f"Enriched task: {enriched_task.dict()}")
+        print(f"Enriched task: {enriched_task.to_dict()}")
     else:
         print(f"Task {args.task_id} not found.")

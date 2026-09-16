@@ -1,9 +1,3 @@
-"""Temporary compatibility shim for the canonical core graph engine.
-
-New imports must use :mod:`backend.core.graph`. This module remains only for
-prototype callers and can be removed after those callers migrate.
-"""
-
 from backend.core.graph.dag import (
     GraphCycleError,
     build_dag,
