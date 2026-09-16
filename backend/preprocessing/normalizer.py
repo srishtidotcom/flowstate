@@ -3,6 +3,7 @@ import json
 import re
 from typing import List, Dict, Optional
 from dataclasses import dataclass
+from backend.models import Event
 import pytesseract
 from PIL import Image
 from PyPDF2 import PdfReader
@@ -19,6 +20,27 @@ class Chunk:
     speaker: Optional[str] = None
     source_ref: str = ""
     metadata: Optional[Dict] = None
+
+
+def event_to_chunks(event: Event) -> List[Chunk]:
+    """Convert one canonical text Event into deterministic extraction input."""
+    if not event.content.strip():
+        return []
+    speaker = event.participants[0] if event.participants else None
+    return [
+        Chunk(
+            text=event.content,
+            speaker=speaker,
+            source_ref=f"event:{event.id}",
+            metadata={
+                "event_id": event.id,
+                "event_type": event.type,
+                "source": event.source,
+                "team_id": event.team_id,
+                "timestamp": event.timestamp.isoformat(),
+            },
+        )
+    ]
 
 def normalize(file_path: str, file_type: str) -> List[Chunk]:
     if file_type == ".txt":

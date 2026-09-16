@@ -17,6 +17,7 @@ class JobResponse(BaseModel):
     error: str | None
     attempt_count: int
     queue_published_at: datetime | None
+    source_event_id: str | None
     result_event_id: str | None
     result_commitment_id: str | None
     created_at: datetime

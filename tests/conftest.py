@@ -15,6 +15,8 @@ import backend.core.activity.engine as activity_engine
 import backend.governance.service as review_service
 import backend.ingestion.service as ingestion_service
 import backend.ingestion.upload as upload_api
+import backend.api.integrations as integrations_api
+import backend.infrastructure.connectors.service as connector_service
 from backend.api.main import app
 from backend.db.orm import Base
 
@@ -59,6 +61,7 @@ def isolated_db(monkeypatch):
     monkeypatch.setattr(ingestion_service, "get_db", test_get_db)
     monkeypatch.setattr(activity_engine, "get_db", test_get_db)
     monkeypatch.setattr(review_service, "get_db", test_get_db)
+    monkeypatch.setattr(connector_service, "get_db", test_get_db)
     yield engine
     Base.metadata.drop_all(engine)
     engine.dispose()
@@ -68,6 +71,7 @@ def isolated_db(monkeypatch):
 def controlled_queue(monkeypatch):
     queue = ControlledQueue()
     monkeypatch.setattr(upload_api, "r", queue)
+    monkeypatch.setattr(integrations_api, "r", queue)
     return queue
 
 

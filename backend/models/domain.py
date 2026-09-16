@@ -129,6 +129,7 @@ class Job(SerializableDomain):
     error: Optional[str] = None
     attempt_count: int = 0
     queue_published_at: Optional[datetime] = None
+    source_event_id: Optional[str] = None
     result_event_id: Optional[str] = None
     result_commitment_id: Optional[str] = None
     created_at: datetime = field(default_factory=utc_now)

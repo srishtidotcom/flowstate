@@ -36,11 +36,15 @@ def persist_extracted_activity(
     job: dict,
     chunks: Iterable[Any],
     tasks: List[Task],
+    *,
+    source_event: Event | None = None,
 ) -> ActivityPersistenceResult:
-    """Persist an upload's event, commitment, tasks, and edges atomically."""
+    """Persist derived activity atomically, reusing a connector source Event."""
     chunks = list(chunks)
-    event = _source_event(job, chunks)
-    commitment = _upload_commitment(job)
+    event = source_event or _source_event(job, chunks)
+    if event.team_id != job["team_id"]:
+        raise ValueError("Event team_id does not match the job team_id")
+    commitment = _source_commitment(job, event, connector_event=source_event is not None)
 
     for index, task in enumerate(tasks):
         if task.team_id != job["team_id"]:
@@ -48,13 +52,26 @@ def persist_extracted_activity(
         task.id = _stable_id(job, f"task:{index}:{task.description}")
         task.commitment_id = commitment.id
 
-    edges = _graph_edges(event, commitment, tasks)
+    edges = _graph_edges(job, event, commitment, tasks)
     validate_dependency_edges(edges)
 
     with get_db() as db:
         existing_event = find_event(db, event.id, job["team_id"])
         existing_commitment = find_commitment(db, commitment.id, job["team_id"])
-        if existing_event or existing_commitment:
+        if source_event is not None:
+            if existing_event is None:
+                raise RuntimeError("Connector source Event is missing")
+            if existing_commitment:
+                stored_tasks = list_tasks_for_commitment(db, commitment.id, job["team_id"])
+                node_ids = [event.id, commitment.id, *(record.id for record in stored_tasks)]
+                stored_edges = list_graph_edges(db, job["team_id"], node_ids)
+                return ActivityPersistenceResult(
+                    event=event_from_record(existing_event),
+                    commitment=commitment_from_record(existing_commitment),
+                    tasks=[task_from_record(record) for record in stored_tasks],
+                    edges=[graph_edge_from_record(record) for record in stored_edges],
+                )
+        elif existing_event or existing_commitment:
             if not (existing_event and existing_commitment):
                 raise RuntimeError("Incomplete persisted activity detected for job")
             stored_tasks = list_tasks_for_commitment(db, commitment.id, job["team_id"])
@@ -66,7 +83,8 @@ def persist_extracted_activity(
                 tasks=[task_from_record(record) for record in stored_tasks],
                 edges=[graph_edge_from_record(record) for record in stored_edges],
             )
-        add_event(db, event)
+        if source_event is None:
+            add_event(db, event)
         add_commitment(db, commitment)
         for task in tasks:
             add_task(db, task)
@@ -110,7 +128,19 @@ def _source_event(job: dict, chunks: List[Any]) -> Event:
     )
 
 
-def _upload_commitment(job: dict) -> Commitment:
+def _source_commitment(
+    job: dict,
+    event: Event,
+    *,
+    connector_event: bool,
+) -> Commitment:
+    if connector_event:
+        return Commitment(
+            id=_stable_id(job, "commitment"),
+            title=f"Work extracted from {event.source}",
+            description=f"Tasks and context extracted from Event {event.id}",
+            team_id=job["team_id"],
+        )
     filename = job.get("filename") or "uploaded source"
     source_name = Path(filename).stem.replace("_", " ").strip() or filename
     return Commitment(
@@ -122,6 +152,7 @@ def _upload_commitment(job: dict) -> Commitment:
 
 
 def _graph_edges(
+    job: dict,
     event: Event,
     commitment: Commitment,
     tasks: List[Task],
@@ -171,7 +202,7 @@ def _graph_edges(
     edges = list(unique_edges.values())
     for edge in edges:
         edge.id = _stable_id(
-            {"team_id": edge.team_id, "job_id": event.raw["job_id"]},
+            job,
             f"edge:{edge.source_id}:{edge.target_id}:{edge.relationship_type}",
         )
     return edges

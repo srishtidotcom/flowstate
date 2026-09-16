@@ -101,6 +101,14 @@ class GraphEdgeRecord(Base):
 
 class JobRecord(Base):
     __tablename__ = "jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "team_id",
+            "type",
+            "source_event_id",
+            name="uq_jobs_connector_source_event",
+        ),
+    )
 
     id = Column(String(36), primary_key=True)
     team_id = Column(String(128), nullable=False, index=True)
@@ -112,6 +120,7 @@ class JobRecord(Base):
     error = Column(Text, nullable=True)
     attempt_count = Column(Integer, nullable=False, default=0)
     queue_published_at = Column(DateTime(timezone=True), nullable=True)
+    source_event_id = Column(String(36), ForeignKey("events.id"), nullable=True, index=True)
     result_event_id = Column(String(36), nullable=True)
     result_commitment_id = Column(String(36), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=utc_now)

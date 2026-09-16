@@ -92,3 +92,19 @@ def test_completion_failure_is_recorded(monkeypatch):
         worker.process_queued_job(_job(), processor=lambda job: result)
 
     assert statuses == [("failed", "Could not complete job job-1")]
+
+
+def test_sync_connector_job_dispatches_to_connector_processor(monkeypatch):
+    completed = []
+    result = StubResult(StubEntity("event-1"), StubEntity("commitment-1"))
+    monkeypatch.setattr(worker, "claim_job", lambda job_id, team_id: True)
+    monkeypatch.setattr(worker, "process_connector_job", lambda job: result)
+    monkeypatch.setattr(
+        worker,
+        "mark_job_completed",
+        lambda *args: completed.append(args) or True,
+    )
+
+    connector_job = _job("sync_connector") | {"event_id": "event-1"}
+    assert worker.process_queued_job(connector_job) is result
+    assert completed == [("job-1", "team-alpha", "event-1", "commitment-1")]

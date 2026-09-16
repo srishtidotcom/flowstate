@@ -1,0 +1,28 @@
+{
+  "connector": "openclaw",
+  "channel": "whatsapp",
+  "account_id": "demo-account",
+  "team_id": "team-demo",
+  "sender": "demo-sender",
+  "conversation_id": "demo-conversation",
+  "timestamp": "2026-09-16T12:00:00Z",
+  "text": "Please prepare the demo by Friday.",
+  "message_id": "demo-message-001",
+  "from_me": false,
+  "metadata": {
+    "thread_id": null
+  },
+  "openclaw_hook": {
+    "event": {
+      "from": "demo-conversation",
+      "content": "Please prepare the demo by Friday.",
+      "messageId": "demo-message-001",
+      "senderId": "demo-sender"
+    },
+    "context": {
+      "channelId": "whatsapp",
+      "accountId": "demo-account",
+      "conversationId": "demo-conversation"
+    }
+  }
+}

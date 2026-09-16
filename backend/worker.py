@@ -10,9 +10,9 @@ from backend.core.activity.engine import ActivityPersistenceResult, persist_extr
 from backend.enrichment.pipeline import enrich_task
 from backend.extraction.extractor import extract_tasks
 from backend.governance.router import classify_tasks
-from backend.ingestion.service import claim_job, mark_job_completed, set_job_status
+from backend.ingestion.service import claim_job, get_event, mark_job_completed, set_job_status
 from backend.models import Task
-from backend.preprocessing.normalizer import normalize
+from backend.preprocessing.normalizer import event_to_chunks, normalize
 
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -33,45 +33,55 @@ def process_job(
     chunks = list(normalizer(job["file_path"], job["file_type"]))
     _bind_original_filename(chunks, job["filename"])
     extracted = list(extractor(chunks))
-
-    tasks = []
-    for item in extracted:
-        owner = item.owner
-        if isinstance(owner, list):
-            owner = ", ".join(owner)
-        task = Task(
-            description=item.title,
-            owner=owner,
-            deadline=item.deadline,
-            confidence=item.confidence,
-            source_ref=getattr(item, "source_ref", None) or job["filename"],
-            source_snippet=getattr(item, "source_snippet", None),
-            team_id=job["team_id"],
-            dependencies=list(item.dependencies or []),
-        )
-        tasks.append(enricher(task, job["team_id"]))
-
-    routing = classify_tasks(tasks)
-    for task in routing["approved"]:
-        task.status = "approved"
-    for task in routing["review"]:
-        task.status = "pending_review"
+    tasks = _to_tasks(extracted, job["team_id"], job["filename"])
+    tasks = [enricher(task, job["team_id"]) for task in tasks]
+    _apply_governance(tasks)
 
     persisted = persist_extracted_activity(job, chunks, tasks)
 
-    if persisted.tasks:
-        encode = embedder or _default_embedder
-        store = vector_store or _default_vector_store
-        embeddings = encode([task.description for task in persisted.tasks])
-        store(persisted.tasks, embeddings)
+    _store_embeddings(persisted.tasks, embedder, vector_store)
 
+    return persisted
+
+
+def process_connector_job(
+    job: dict,
+    *,
+    extractor: Callable[[list[Any]], Iterable[Any]] = extract_tasks,
+    enricher: Callable[[Task, str], Task] = enrich_task,
+    embedder: Callable[[list[str]], list[list[float]]] | None = None,
+    vector_store: Callable[[list[Task], list[list[float]]], None] | None = None,
+) -> ActivityPersistenceResult:
+    """Process a persisted canonical connector Event without recreating it."""
+    event_id = job.get("event_id")
+    if not event_id:
+        raise ValueError("sync_connector job must include event_id")
+    event = get_event(event_id, job["team_id"])
+    if event is None:
+        raise ValueError(f"Connector Event {event_id} was not found for this team")
+
+    chunks = event_to_chunks(event)
+    if not chunks:
+        raise ValueError("Connector Event has no text to process")
+    extracted = list(extractor(chunks))
+    tasks = _to_tasks(extracted, job["team_id"], event_id)
+    tasks = [enricher(task, job["team_id"]) for task in tasks]
+    _apply_governance(tasks)
+
+    persisted = persist_extracted_activity(
+        job,
+        chunks,
+        tasks,
+        source_event=event,
+    )
+    _store_embeddings(persisted.tasks, embedder, vector_store)
     return persisted
 
 
 def process_queued_job(
     job: dict,
     *,
-    processor: Callable[[dict], ActivityPersistenceResult] = process_job,
+    processor: Callable[[dict], ActivityPersistenceResult] | None = None,
 ) -> ActivityPersistenceResult:
     """Claim once, record failures, and complete one durable job."""
     job_id = job.get("job_id")
@@ -82,9 +92,14 @@ def process_queued_job(
     if not claim_job(job_id, team_id):
         raise ValueError(f"Job {job_id} is missing or has already been claimed")
     try:
-        if job.get("type") != "process_upload":
+        job_type = job.get("type")
+        if job_type == "process_upload":
+            selected_processor = processor or process_job
+        elif job_type == "sync_connector":
+            selected_processor = processor or process_connector_job
+        else:
             raise ValueError(f"Unsupported job type: {job.get('type')!r}")
-        result = processor(job)
+        result = selected_processor(job)
         if not mark_job_completed(
             job_id,
             team_id,
@@ -119,6 +134,48 @@ def _default_vector_store(tasks: list[Task], embeddings: list[list[float]]) -> N
     from backend.vector_db import store_tasks_batch
 
     store_tasks_batch(tasks, embeddings)
+
+
+def _to_tasks(extracted: Iterable[Any], team_id: str, fallback_ref: str) -> list[Task]:
+    tasks = []
+    for item in extracted:
+        owner = item.owner
+        if isinstance(owner, list):
+            owner = ", ".join(owner)
+        tasks.append(
+            Task(
+                description=item.title,
+                owner=owner,
+                deadline=item.deadline,
+                confidence=item.confidence,
+                source_ref=getattr(item, "source_ref", None) or fallback_ref,
+                source_snippet=getattr(item, "source_snippet", None),
+                team_id=team_id,
+                dependencies=list(item.dependencies or []),
+            )
+        )
+    return tasks
+
+
+def _apply_governance(tasks: list[Task]) -> None:
+    routing = classify_tasks(tasks)
+    for task in routing["approved"]:
+        task.status = "approved"
+    for task in routing["review"]:
+        task.status = "pending_review"
+
+
+def _store_embeddings(
+    tasks: list[Task],
+    embedder: Callable[[list[str]], list[list[float]]] | None,
+    vector_store: Callable[[list[Task], list[list[float]]], None] | None,
+) -> None:
+    if not tasks:
+        return
+    encode = embedder or _default_embedder
+    store = vector_store or _default_vector_store
+    embeddings = encode([task.description for task in tasks])
+    store(tasks, embeddings)
 
 
 def _bind_original_filename(chunks: list[Any], filename: str) -> None:

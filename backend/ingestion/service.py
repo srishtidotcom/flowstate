@@ -52,8 +52,8 @@ class JobResults:
     edges: list[GraphEdge]
 
 
-def enqueue_upload_job(job: Job, queue: Any) -> bool:
-    """Persist a job and atomically publish it once for this attempt."""
+def enqueue_job(job: Job, queue: Any) -> bool:
+    """Persist a durable job and atomically publish it once for this attempt."""
     with get_db() as db:
         existing = find_job(db, job.id, job.team_id)
         if existing is None:
@@ -71,6 +71,7 @@ def enqueue_upload_job(job: Job, queue: Any) -> bool:
         "filename": job.filename,
         "file_path": job.file_path,
         "file_type": job.file_type,
+        "event_id": job.source_event_id,
         "attempt": attempt_count + 1,
     }
     delivery_key = f"{job.id}:{attempt_count}"
@@ -90,10 +91,21 @@ def enqueue_upload_job(job: Job, queue: Any) -> bool:
     return published
 
 
+def enqueue_upload_job(job: Job, queue: Any) -> bool:
+    """Backward-compatible upload-specific name for the generic dispatcher."""
+    return enqueue_job(job, queue)
+
+
 def get_job(job_id: str, team_id: str) -> Optional[Job]:
     with get_db() as db:
         record = find_job(db, job_id, team_id)
         return job_from_record(record) if record else None
+
+
+def get_event(event_id: str, team_id: str) -> Optional[Event]:
+    with get_db() as db:
+        record = find_event(db, event_id, team_id)
+        return event_from_record(record) if record else None
 
 
 def get_job_results(job_id: str, team_id: str) -> Optional[JobResults]:
@@ -156,7 +168,7 @@ def retry_failed_job(job_id: str, team_id: str, queue: Any) -> bool:
         if record is None:
             return False
         job = job_from_record(record)
-    enqueue_upload_job(job, queue)
+    enqueue_job(job, queue)
     return True
 
 
