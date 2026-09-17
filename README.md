@@ -1,1288 +1,273 @@
-# 🚀 Flowstate — Engineering Build Log
+# Flowstate
 
-> **Status:** 🔨 Active Development
-> **Builders:** Srishti & Siya
-> **Project:** AI-Powered Workflow Orchestration System — Full Production Architecture
-> **Last Updated:** June 2026
-> **Version:** 2.0 — Full Production System
+Flowstate is an AI-native personal attention and workflow system that turns scattered activity into durable, traceable work context.
 
----
+Work rarely begins as a clean task. It arrives through messages, documents, meetings, deadlines, requests, calendars, and project systems. The context needed to act is split across those sources, while most productivity tools expect the user to reconstruct it manually.
 
-## 📌 What We're Building
+Flowstate is being built to observe that activity, preserve the original evidence, extract structured commitments and tasks, and model how work should compete for attention over time. The repository currently contains the durable ingestion and processing foundation for that direction; attention modelling, planning, and agent execution remain future work.
 
-Flowstate is an AI-powered workflow orchestration system that converts unstructured communication (WhatsApp exports, emails, meeting transcripts, screenshots) into structured, actionable task workflows — surfaced through a live intelligence layer that learns how you work.
+<!-- Add Flowstate Attention Graph screenshot here -->
 
-This document is the **authoritative build log** for the full production system: infrastructure, core engines, agent layer, API, and frontend.
+## Why Flowstate
 
-> **Inference Strategy:** Ollama as the primary runtime (Phases 0–12). Lemonade integration explored post-stabilisation as a performance layer.
+Existing task systems are good at storing work that someone has already identified and entered. They do not usually perform the translation from an informal request, conversation, or document into structured work while retaining why that work exists.
 
----
+Flowstate is intended to become that translation layer: converting activity into durable context, linking derived work back to its source, and maintaining a personal model of commitments rather than another disconnected task list.
 
-## 👩‍💻 Team
+## The Core Idea
 
-| Name | Role |
-|------|------|
-| Srishti | Co-builder |
-| Siya | Co-builder |
+The long-term loop is:
 
----
-
-## 🗂️ Table of Contents
-
-1. [System Architecture](#system-architecture)
-2. [Repository Structure](#repository-structure)
-3. [Prerequisites](#prerequisites)
-4. [Environment Setup](#environment-setup)
-5. [Architecture Decision Records](#architecture-decision-records)
-6. [Build Process — Phase by Phase](#build-process)
-7. [Running the System](#running-the-system)
-8. [Testing & Evaluation](#testing--evaluation)
-9. [Deployment](#deployment)
-10. [Current Progress](#current-progress)
-11. [Engineering Principles](#engineering-principles)
-12. [Known Issues](#known-issues)
-13. [Roadmap — Post MVP](#roadmap)
-
----
-
-## 🏛️ System Architecture
-
-The full production system is layered into four tiers. Dependencies always point inward — the domain never knows that infrastructure exists.
-
-```
-                        Flowstate
-═══════════════════════════════════════════════════
-
-                  Frontend (Next.js)
-                         │
-                  Flowstate API (FastAPI)
-                         │
-
-═══════════════════════════════════════════════════
-                   FLOWSTATE CORE
-═══════════════════════════════════════════════════
-
-    Activity Engine      │    Graph Engine
-    Memory Engine        │    User Model Engine
-    Planning Engine      │    Execution Engine
-    Learning Engine      │
-
-═══════════════════════════════════════════════════
-              AGENT LAYER
-═══════════════════════════════════════════════════
-
-    Orchestrator Agent   │    Planner Agent
-    Communicator Agent   │    Memory Agent
-
-═══════════════════════════════════════════════════
-              INFRASTRUCTURE LAYER
-═══════════════════════════════════════════════════
-
-    Connector Adapter    │    Workflow Adapter
-    (OpenClaw)           │    (n8n)
-
-═══════════════════════════════════════════════════
-              EXTERNAL SYSTEMS
-═══════════════════════════════════════════════════
-
-    Gmail  │  Slack  │  GitHub  │  Calendar
-    WhatsApp │ Drive │ Notion   │  Discord
+```mermaid
+flowchart LR
+    S[Sources] --> E[Events]
+    E --> D[Durable processing]
+    D --> C[Commitments and context]
+    C --> W[Personal work model]
+    W --> A[Attention model]
+    A --> P[Plans and actions]
+    P --> V[Verification and learning]
 ```
 
-### The Dependency Rule
+Today, the repository implements the beginning of this loop: source ingestion, durable jobs, extraction, enrichment, provenance, persistence, review, and result retrieval. It does not yet implement a personal work model, attention scoring, planning, autonomous actions, or learning.
 
+## Current Status
+
+### Implemented
+
+- A FastAPI upload endpoint for WhatsApp text exports, Discord export JSON, PDF, DOCX, PNG, and JPG inputs. Files are stored on the local filesystem and represented by durable processing jobs.
+- A PostgreSQL model and Alembic migrations for jobs, Events, Commitments, Tasks, graph edges, and human review decisions. Records and reads are scoped by the current MVP tenancy key, `team_id`.
+- A Redis-backed worker with database-first job creation, atomic queued-to-running claims, lifecycle timestamps, recorded failures, explicit retry support, and per-attempt publication deduplication.
+- Deterministic normalization for supported file types and canonical connector Events.
+- Ollama-based task extraction with JSON Schema validation, bounded batching, explicit transport failures, confidence scores, exact source snippets, and stable source references.
+- Deterministic deadline normalization, limited historical owner inference, and ChromaDB-backed duplicate-candidate lookup and task embedding storage.
+- Transactional persistence of a source Event, a source-level Commitment, extracted Tasks, and provenance/dependency edges. Stable IDs make downstream persistence idempotent, and dependency cycles are rejected before writes.
+- Confidence-based governance, a team-scoped review queue, immutable approve/reject decisions, and eligibility filtering for approved tasks.
+- Job status and result APIs that return the persisted Event, Commitment, Tasks, and graph edges after processing.
+- An OpenClaw plugin and inbound adapter for WhatsApp text. The bridge is loopback-only, HMAC-signed, rejects stale/outbound/invalid events, preserves the raw payload, and handles redelivery without duplicating the canonical Event or job.
+- Deterministic NetworkX DAG construction, cycle validation, longest-path calculation, and simple bottleneck detection.
+
+### In Progress
+
+- Live demo wiring and operational validation of the OpenClaw WhatsApp bridge. The repository contains the plugin, ingress route, smoke test, and integration tests; installation into a running OpenClaw gateway is manual.
+- Connector coverage. WhatsApp text is the only live OpenClaw channel accepted today. Discord can be normalized from an uploaded export, but live Discord ingestion is not implemented.
+- Enrichment depth. Owner inference can reuse an exact historical task description, but persisted speaker-frequency inference is still a stub. Duplicate detection is a basic derived-index check, not a learned personal work model.
+- Memory. ChromaDB currently stores and queries per-team task embeddings; the durable semantic memory and retrieval engine described in the product direction does not exist yet.
+- Product UI. `frontend/` is a React/Vite scaffold and does not yet contain a Flowstate dashboard or attention graph.
+
+### Planned
+
+- A personal workload and preference model with persistent context across sources.
+- An attention model informed by effort, importance, deadlines, dependencies, schedule availability, historical behavior, and context-switching cost.
+- Richer commitment grouping, dependency modelling, critical-path reasoning, and cross-source retrieval.
+- Planning, permissioned agent execution, action verification, and feedback-driven learning.
+- Broader live connector support, including Discord and additional communication, calendar, document, and project systems.
+- Approval and permission controls around external actions, plus an installable, productized runtime.
+
+## Architecture
+
+The current system has two ingestion paths: local file uploads and authenticated WhatsApp text events forwarded by a local OpenClaw plugin. Both converge on the same durable job and worker pipeline.
+
+```mermaid
+flowchart LR
+    F[File upload] --> API[FastAPI]
+    O[OpenClaw WhatsApp plugin] --> API
+    API --> FS[Local object storage]
+    API --> PG[(PostgreSQL)]
+    API --> R[(Redis queue)]
+    R --> W[Worker]
+    FS --> W
+    PG --> W
+    W --> N[Normalize and extract]
+    N --> G[Enrich and govern]
+    G --> PG
+    G --> C[(ChromaDB task index)]
+    PG --> Q[Job results and review APIs]
 ```
-Gmail / Slack / External
-        ↓
-   Infrastructure Adapters
-        ↓
-   Execution Engine
-        ↓
-   Planning Engine
-        ↓
-   Graph / Memory / User Model
-        ↓
-   Domain (Commitments, Events, Entities)
+
+PostgreSQL is authoritative for processing state and structured activity. Redis transports job identifiers and payloads; ChromaDB is a rebuildable derived index. External connector details remain behind the connector adapter boundary, while core activity persistence uses canonical domain objects.
+
+Future direction, not current architecture:
+
+```mermaid
+flowchart LR
+    C[Durable context] --> M[Personal work model]
+    M --> A[Attention and planning]
+    A --> X[Permissioned actions]
+    X --> L[Verification and learning]
 ```
 
-**The domain never imports from infrastructure. Infrastructure never imports from the domain.**
+See the [architecture decisions](./docs/adr/) and [OpenClaw bridge design](./docs/openclaw-inbound-bridge.md) for the deeper constraints.
 
-### Core Domain Object
+## Durable Processing Spine
 
-Everything in Flowstate rolls up into a **Commitment** — not a Task, not an Email, not a Meeting.
+The processing spine is designed so accepted work remains inspectable when a queue, model, vector store, or worker step fails. Flowstate creates a database job before publication, publishes each attempt once, atomically claims only queued jobs, and records running, completed, or failed state with attempt counts and timestamps.
 
+Processing writes the Event, Commitment, Tasks, and graph edges in one relational transaction. Derived IDs are stable for a job, so a retry after a later failure can reuse already-persisted activity instead of creating another copy. Connector acceptance similarly stores the canonical Event and its single job before attempting Redis publication. This provides durable, at-least-once processing semantics; it does not claim distributed exactly-once delivery.
+
+The relevant decisions are documented in [ADR 004](./docs/adr/004-commitment-central-domain-object.md), [ADR 006](./docs/adr/006-team-id-tenancy.md), and [ADR 007](./docs/adr/007-openclaw-inbound-bridge.md).
+
+## Demo Scope
+
+The immediate demo is intended to prove that a real application message can cross a connector boundary and become inspectable, structured work without losing its source:
+
+```text
+WhatsApp text
+→ OpenClaw plugin
+→ authenticated Flowstate ingress
+→ durable Event and job
+→ worker extraction and enrichment
+→ Commitment, Tasks, and provenance
+→ job results API
 ```
-Commitment: Apply to Databricks
 
-├── Email from recruiter        (Event)
-├── Resume document             (Document)
-├── Calendar reminder           (Event)
-├── Interview prep tasks        (Tasks)
-├── GitHub portfolio            (Entity)
-└── Follow-up email             (Task)
-```
+That path is implemented for inbound WhatsApp text, subject to a locally configured OpenClaw gateway, PostgreSQL, Redis, ChromaDB, and Ollama. Live Discord ingestion and the Attention Graph UI are the next demo-facing pieces, not completed capabilities.
 
-The graph doesn't just connect tasks — it connects **intent**.
+<!-- Add demo GIF here -->
 
----
+<!-- Add Attention Graph screenshot here -->
 
-## 📁 Repository Structure
+<!-- Add task/source provenance screenshot here -->
 
-```
+## Attention Model
+
+A deadline calendar says when something is due. Flowstate is intended to model when that commitment should demand attention. A request such as “video due tomorrow” should affect today's workload because the work must happen before the deadline.
+
+The current implementation stores and normalizes deadlines and persists task dependency edges, but it does not calculate attention scores or allocate work against a schedule. Planned inputs include deadline proximity, estimated effort, importance, dependencies, schedule availability, historical behavior, and context-switching cost.
+
+The planned learning loop also covers unfamiliar work: Flowstate can ask the user for effort or importance when it lacks a reliable prior, then reuse that answer for sufficiently similar future work. This interaction and similarity-based learning behavior are not implemented today.
+
+## Repository Structure
+
+```text
 flowstate/
-
-├── frontend/
-│   ├── app/
-│   │   ├── dashboard/
-│   │   ├── graph/
-│   │   ├── inbox/
-│   │   └── memory/
-│   ├── components/
-│   └── package.json
-
 ├── backend/
-
-│   ├── api/
-│   │   ├── main.py                  # FastAPI entrypoint
-│   │   ├── routes/
-│   │   │   ├── upload.py
-│   │   │   ├── tasks.py
-│   │   │   ├── graph.py
-│   │   │   ├── review.py
-│   │   │   ├── planning.py
-│   │   │   └── execution.py
-│   │   └── middleware/
-│   │       ├── auth.py
-│   │       └── logging.py
-
-│   ├── core/
-│   │   ├── activity/
-│   │   │   └── engine.py            # Event → structured knowledge
-│   │   ├── graph/
-│   │   │   └── dag.py               # DAG, critical path, bottlenecks
-│   │   ├── memory/
-│   │   │   └── engine.py            # Semantic retrieval, embeddings
-│   │   ├── user_model/
-│   │   │   └── engine.py            # Preferences, tone, schedule
-│   │   ├── planning/
-│   │   │   └── engine.py            # Next-action recommendations
-│   │   ├── execution/
-│   │   │   └── engine.py            # Draft, send, schedule, create
-│   │   └── learning/
-│   │       └── engine.py            # Feedback → refinement loop
-
-│   ├── ingestion/
-│   │   └── upload.py                # File upload, async queue
-│   ├── preprocessing/
-│   │   └── normalizer.py            # Multimodal → clean chunks
-│   ├── extraction/
-│   │   └── extractor.py             # LLM schema-enforced extraction
-│   ├── enrichment/
-│   │   ├── pipeline.py
-│   │   ├── ownership.py
-│   │   ├── deadlines.py
-│   │   └── duplicates.py
-
-│   ├── agents/
-│   │   ├── orchestrator/
-│   │   │   └── agent.py
-│   │   ├── planner/
-│   │   │   └── agent.py
-│   │   ├── communicator/
-│   │   │   └── agent.py
-│   │   └── memory/
-│   │       └── agent.py
-
-│   ├── infrastructure/
-│   │   ├── connectors/
-│   │   │   ├── connector_adapter.py # Abstraction over OpenClaw
-│   │   │   └── openclaw/
-│   │   │       └── client.py
-│   │   └── workflows/
-│   │       ├── workflow_adapter.py  # Abstraction over n8n
-│   │       └── n8n/
-│   │           └── client.py
-
-│   ├── models/
-│   │   ├── domain.py                # Commitment, Event, Entity, Task
-│   │   └── schemas.py               # Pydantic API schemas
-│   ├── db/
-│   │   ├── database.py
-│   │   └── migrations/
-│   ├── vector_db.py
-│   └── worker.py                    # Redis async job consumer
-
-├── inference/
-│   └── ollama/
-│       └── pull_model.sh
-
-├── scripts/
-│   ├── synthetic_gen.py
-│   ├── eval.py
-│   └── auth_calendar.py
-
-├── docker/
-│   └── docker-compose.yml
-
-├── docs/
-│   └── adr/                         # Architecture Decision Records
-│       ├── 001-postgres-over-graph-db.md
-│       ├── 002-openclaw-behind-adapter.md
-│       └── 003-ollama-primary-runtime.md
-
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── fixtures/
-
-├── data/
-│   └── synthetic_hackathon.json
-
-├── .env.example
-├── requirements.txt
-├── testing.md
-└── BUILD_LOG.md                     # ← You are here
+│   ├── api/                  # FastAPI ingress, jobs, results, enrichment, and review routes
+│   ├── core/                 # Implemented activity persistence and graph algorithms
+│   ├── db/                   # SQLAlchemy records, repositories, and transaction boundaries
+│   ├── extraction/           # Schema-enforced Ollama task extraction
+│   ├── enrichment/           # Ownership, deadline, and duplicate processing
+│   ├── governance/           # Confidence routing and human review lifecycle
+│   ├── infrastructure/       # Connector boundary and OpenClaw bridge
+│   ├── ingestion/            # Upload acceptance and durable queue publication
+│   ├── models/               # Canonical domain objects and HTTP schemas
+│   ├── preprocessing/        # File and canonical Event normalization
+│   └── worker.py             # Redis consumer and processing orchestration
+├── alembic/                   # PostgreSQL schema migrations
+├── docker/                    # Local PostgreSQL, Redis, and ChromaDB services
+├── docs/                      # ADRs and connector operating guide
+├── frontend/                  # React/Vite scaffold; product UI is not implemented
+├── inference/                 # Ollama helper scripts and notes
+├── scripts/                   # Smoke, evaluation, and development utilities
+└── tests/                     # Unit, integration, and fixture coverage
 ```
 
----
+## Running Locally
 
-## ✅ Prerequisites
+### Prerequisites
 
-### System Requirements
+- Python 3.10 or newer
+- Docker with Compose for PostgreSQL, Redis, and ChromaDB
+- Ollama with the `mistral` model for real extraction
+- Tesseract OCR only when processing PNG or JPG uploads
+- Node.js and npm only for the current frontend scaffold
+- OpenClaw `2026.9.4` or compatible only for the live WhatsApp bridge
 
-| Requirement | Minimum | Recommended |
-|------------|---------|-------------|
-| OS | Ubuntu 22.04 / macOS 13 / Windows 11 WSL2 | Ubuntu 22.04 LTS |
-| RAM | 16 GB | 32 GB |
-| CPU | Modern multi-core | Any |
-| GPU | Optional (CUDA / Metal) | Optional |
-| Disk | 30 GB free | 50 GB free |
-
-### Required Tools
-
-| Tool | Version | Purpose |
-|------|---------|---------|
-| Python | 3.10+ | Backend runtime |
-| Node.js | 18+ | Frontend |
-| Docker + Docker Compose | Latest | Containerised services |
-| Git | Any | Version control |
-| Ollama | Latest | LLM inference runtime |
-| Tesseract OCR | Latest | Image OCR binary |
-
-### Installing Tesseract OCR
+### Install and configure
 
 ```bash
-# Ubuntu / Debian
-sudo apt-get install tesseract-ocr
-
-# macOS
-brew install tesseract
-
-# Windows
-# Download: https://github.com/UB-Mannheim/tesseract/wiki
-```
-
----
-
-## 🛠️ Environment Setup
-
-### Step 1 — Clone the Repository
-
-```bash
-git clone https://github.com/your-org/flowstate.git
-cd flowstate
-```
-
-### Step 2 — Create Python Virtual Environment
-
-```bash
-python3 -m venv venv
-source venv/bin/activate        # Linux / macOS
-venv\Scripts\activate           # Windows
-```
-
-### Step 3 — Copy Environment Variables
-
-```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
 cp .env.example .env
+set -a
+source .env
+set +a
 ```
 
-Open `.env` and fill in:
+The checked-in defaults target local services. Review `.env.example` before use; its database password is a development default. `OBJECT_STORE_PATH` defaults to `./storage/objects` and is created by the upload endpoint.
 
-```env
-# Inference
-INFERENCE_RUNTIME=ollama
-OLLAMA_API_BASE=http://localhost:11434
-
-# Database
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=flowstate
-POSTGRES_USER=flowstate_user
-POSTGRES_PASSWORD=flowstate123
-
-# ChromaDB
-CHROMA_HOST=localhost
-CHROMA_PORT=8000
-
-# Redis
-REDIS_URL=redis://localhost:6379
-
-# Object Store
-OBJECT_STORE_PATH=./storage/objects
-
-# Confidence Thresholds
-EXTRACTION_CONFIDENCE_THRESHOLD=0.75
-OWNERSHIP_INFERENCE_THRESHOLD=0.70
-DUPLICATE_SIMILARITY_THRESHOLD=0.85
-
-# Optional: Calendar Integration
-GOOGLE_CALENDAR_CREDENTIALS_PATH=./credentials/google_calendar.json
-
-# Optional: OpenClaw
-OPENCLAW_API_KEY=your_key_here
-OPENCLAW_API_BASE=https://api.openclaw.io/v1
-
-# Optional: n8n
-N8N_BASE_URL=http://localhost:5678
-N8N_API_KEY=your_n8n_key
-```
-
-> **Important:** `POSTGRES_PASSWORD` must match `docker/docker-compose.yml`. Default is `flowstate123`. Change both together.
-
----
-
-## 📐 Architecture Decision Records
-
-Every major decision lives in `docs/adr/`. Key decisions:
-
-| ADR | Decision | Reason |
-|-----|----------|--------|
-| 001 | PostgreSQL + pgvector over a graph DB | Simpler ops, SQL for structured queries, pgvector for embeddings. Graph algorithms via NetworkX in Python. |
-| 002 | OpenClaw behind ConnectorAdapter | Swap the connector provider in one folder without touching the core. |
-| 003 | Ollama as primary runtime | Local, no API cost, CPU-compatible. Lemonade explored post-stabilisation. |
-| 004 | Commitment as the core domain object | Tasks are ephemeral. Commitments are what users actually track across time. |
-| 005 | LLMs only in 3 places | Activity Engine, Planning Engine, Communicator Agent. Everything else is deterministic. |
-
----
-
-## 🏗️ Build Process
-
-The build is organised around **capabilities the product gains**, not technologies implemented.
-
----
-
-### Phase 0 — Architecture & Specification ⬜ Not Started
-
-**Goal:** Freeze the full architecture before a single line of implementation code is written.
-
-**Deliverables:**
-
-- Product Requirements Document (PRD)
-- Engineering Design Document (EDD)
-- Domain Model with all entities and relationships
-- API contracts between every engine
-- Database schema (PostgreSQL tables + pgvector columns)
-- Sequence diagrams for key flows
-- Deployment architecture
-
-**Domain Objects:**
-
-```text
-User
-Event
-Entity
-Commitment
-Task
-Project
-Document
-Conversation
-Relationship
-Preference
-```
-
-**Relationship Types:**
-
-```text
-created_by    depends_on    blocks
-belongs_to    owned_by      mentions
-related_to    inferred_from
-```
-
-**Key Sequence Diagrams to Define:**
-
-1. `email_arrives → event → graph_update → recommendation`
-2. `file_upload → normalise → extract → enrich → DAG`
-3. `user_edits_task → diff_stored → user_model_updated`
-4. `planner_query → graph + memory + user_model → plan`
-
-**Exit criteria:** No architecture changes without a written RFC. ADR folder populated.
-
----
-
-### Phase 1 — Project Foundation 🔨 In Progress
-
-**Goal:** Deploy an empty application skeleton end-to-end.
-
-**Backend skeleton:**
+### Start the backend pipeline
 
 ```bash
-backend/
-  api/main.py          → returns {"status": "ok"}
-  core/                → empty __init__.py in each module
-  infrastructure/      → empty adapters
-  models/domain.py     → Commitment, Event, Entity, Task dataclasses
-  db/database.py       → SQLAlchemy session factory
+docker compose -f docker/docker-compose.yml up -d postgres chromadb redis
+ollama pull mistral
+ollama serve
 ```
 
-**Infrastructure:**
+With those services running, use separate terminals from the repository root:
 
 ```bash
-# Docker Compose with:
-# postgres, chromadb, redis, ollama
+# Apply the PostgreSQL schema
+.venv/bin/python -m alembic upgrade head
 
-docker-compose -f docker/docker-compose.yml up -d
+# Start the API on loopback
+.venv/bin/uvicorn backend.api.main:app --host 127.0.0.1 --port 8001 --reload
+
+# Start the Redis worker
+.venv/bin/python -m backend.worker
 ```
 
-**CI/CD:**
+The API root is `http://127.0.0.1:8001/`; interactive API documentation is available at `/docs`.
 
-- Linting: `ruff`
-- Formatting: `black`
-- Unit tests: `pytest`
-- Auto-deploy on push to `main`
+The worker loads the sentence-transformer model on first use and calls Ollama and ChromaDB during real processing. Model downloads and initial startup can therefore take time.
 
-**Authentication:**
-
-```python
-# JWT-based auth
-# POST /auth/login → token
-# All /api/* routes require Bearer token
-```
-
-**Exit criteria:** Empty FastAPI app deploys. Docker services start. CI passes.
-
----
-
-### Phase 2 — Connector Layer ⬜ Not Started
-
-**Goal:** Connect Flowstate to external systems through a stable abstraction.
-
-**ConnectorAdapter interface:**
-
-```python
-# backend/infrastructure/connectors/connector_adapter.py
-
-class ConnectorAdapter:
-    def get_emails(self, since: datetime) -> list[Event]: ...
-    def send_email(self, to: str, subject: str, body: str) -> None: ...
-    def search_messages(self, query: str) -> list[Event]: ...
-    def list_events(self, date: date) -> list[Event]: ...
-    def create_calendar_event(self, event: CalendarEvent) -> None: ...
-    def get_slack_messages(self, channel: str) -> list[Event]: ...
-```
-
-Under the hood:
-
-```python
-# backend/infrastructure/connectors/openclaw/client.py
-# Wraps OpenClaw SDK calls → returns normalised Event objects
-```
-
-**Event Normalisation:**
-
-Every source produces identical `Event` objects:
-
-```python
-@dataclass
-class Event:
-    id: str
-    type: str               # "email_received", "slack_message", "calendar_event"
-    source: str             # "gmail", "slack", "calendar"
-    content: str
-    participants: list[str]
-    timestamp: datetime
-    raw: dict               # original payload preserved
-```
-
-**Connectors to implement (in order):**
-
-1. Gmail (email received, email sent)
-2. Google Calendar (event created, event upcoming)
-3. Slack (message received)
-4. WhatsApp (exported chat upload)
-5. GitHub (PR opened, review requested)
-
-**WorkflowAdapter interface:**
-
-```python
-# backend/infrastructure/workflows/workflow_adapter.py
-
-class WorkflowAdapter:
-    def run(self, workflow_name: str, payload: dict) -> dict: ...
-    def schedule(self, workflow_name: str, cron: str) -> None: ...
-```
-
-**Exit criteria:** Events stream from Gmail and Calendar into the database. `ConnectorAdapter` tested with mock. Core never imports `openclaw` directly.
-
----
-
-### Phase 3 — Ingestion & Preprocessing 🔨 In Progress / Testing
-
-**Goal:** Accept any file format, normalise to clean text chunks with speaker metadata.
-
-**Upload endpoint:**
-
-```python
-# backend/ingestion/upload.py
-
-@router.post("/upload")
-async def upload_file(file: UploadFile, team_id: str):
-    # Save raw file to object store
-    # Push job metadata to Redis list
-    # Return job_id
-```
-
-Supported formats: `.txt` (WhatsApp export), `.pdf`, `.docx`, `.png`/`.jpg`, `.json` (Discord).
-
-**Start the async worker:**
-
-```bash
-python -m backend.worker
-# Plain Python Redis consumer (brpop on flowstate:jobs)
-# Does NOT use Celery
-```
-
-**Normaliser:**
-
-```python
-# backend/preprocessing/normalizer.py
-
-def normalize(file_path: str, file_type: str) -> list[Chunk]:
-    if file_type == "txt":
-        return chunk_by_speaker(file_path)
-    elif file_type == "pdf":
-        return extract_pdf_text(file_path)
-    elif file_type in ["png", "jpg"]:
-        return extract_image_text(file_path)   # pytesseract
-    elif file_type == "docx":
-        return extract_docx_text(file_path)
-```
-
-**Test preprocessing:**
-
-```bash
-python -m backend.preprocessing.normalizer --file tests/fixtures/sample_whatsapp.txt
-python -m backend.preprocessing.normalizer --file tests/fixtures/sample_screenshot.png
-```
-
-**Exit criteria:** All five input formats produce valid `Chunk` objects. Worker consumes from Redis correctly.
-
----
-
-### Phase 4 — Activity Engine 🔨 In Progress / Testing
-
-**Goal:** Convert normalised events into structured domain objects (Tasks, Commitments, Entities).
-
-**Extraction schema (strict JSON enforcement):**
-
-```python
-TASK_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "task":         { "type": "string" },
-        "owner":        { "type": ["string", "null"] },
-        "deadline":     { "type": ["string", "null"] },
-        "dependencies": { "type": "array", "items": { "type": "string" } },
-        "confidence":   { "type": "number" },
-        "source_ref":   { "type": "string" },
-        "commitment":   { "type": ["string", "null"] }
-    },
-    "required": ["task", "confidence", "source_ref"]
-}
-```
-
-Few-shot prompt covers:
-- Clean task with explicit owner
-- Implicit deadline ("by end of day Friday")
-- Task with dependency chain
-- Task assigned to no one
-
-**Test extraction:**
-
-```bash
-python -m backend.extraction.extractor \
-  --chunk "Rahul can you finish the pitch deck by Thursday evening?"
-# Expected: {task: "Complete pitch deck", owner: "Rahul", deadline: "Thursday evening", confidence: 0.94}
-```
-
-**Enrichment pipeline:**
-
-```python
-# backend/enrichment/pipeline.py
-# ownership.py  → infer missing owners from history + speaker frequency
-# deadlines.py  → "Next Friday" → "2026-06-30T23:59:00+05:30"
-# duplicates.py → cosine similarity check against ChromaDB
-```
-
-**Exit criteria:** Incoming events automatically create `Task` and `Commitment` records. Enrichment covers ownership inference, deadline normalisation, and deduplication.
-
----
-
-### Phase 5 — Graph Engine 🔨 In Progress / Testing
-
-**Goal:** Model all entities and commitments as a directed acyclic graph. Surface dependencies, bottlenecks, critical path.
-
-```python
-# backend/core/graph/dag.py
-import networkx as nx
-
-G = nx.DiGraph()
-G.add_node("task_001", label="Design wireframes", deadline="2026-07-01")
-G.add_node("task_002", label="Build frontend", deadline="2026-07-05")
-G.add_edge("task_001", "task_002")  # frontend depends on wireframes
-
-critical_path = nx.dag_longest_path(G)
-bottlenecks   = [n for n in G.nodes if G.in_degree(n) > 2]
-```
-
-**Graph node types:**
-
-| Node Type | Example |
-|-----------|---------|
-| Task | "Complete pitch deck" |
-| Commitment | "Databricks application" |
-| Project | "Q3 hiring" |
-| Document | "Resume v3.pdf" |
-| Meeting | "Interview — Monday 10am" |
-| Person | "Rahul", "Siya" |
-
-**Edge types:**
-
-| Edge | Meaning |
-|------|---------|
-| `depends_on` | B cannot start until A is done |
-| `blocks` | A is blocking B |
-| `belongs_to` | Task belongs to Commitment |
-| `created_by` | Entity created by Person |
-| `mentions` | Event mentions Entity |
-| `owned_by` | Task owned by Person |
-
-**Available functions in `backend/core/graph/dag.py`:**
-
-- `build_dag(transcript_id)` — construct from stored task/edge data
-- `get_critical_path()` — longest dependency chain
-- `get_bottlenecks()` — high-in-degree nodes
-- `get_dag_summary()` — summary dict for API
-- `detect_cycles()` — validation before persistence
-- `impact_analysis(task_id)` — what breaks if this task is late
-
-**Storage:** Edges in PostgreSQL (adjacency list). Traversal in memory via NetworkX.
-
-**Test:**
-
-```bash
-python -m backend.core.graph.dag --transcript-id <id>
-```
-
-**Exit criteria:** Graph updates automatically on new task creation. Critical path and bottleneck APIs respond correctly.
-
----
-
-### Phase 6 — Memory Engine ⬜ Not Started
-
-**Goal:** Give Flowstate persistent context — every entity has provenance.
-
-**What Memory Engine stores:**
-
-```text
-Task / Commitment embeddings
-Conversation history
-Meeting summaries
-Document content embeddings
-Person → context associations
-```
-
-**Retrieval modes:**
-
-```python
-# backend/core/memory/engine.py
-
-class MemoryEngine:
-    def search(self, query: str, top_k: int = 5) -> list[MemoryResult]: ...
-    def get_context_for_task(self, task_id: str) -> Context: ...
-    def get_timeline(self, entity_id: str) -> list[Event]: ...
-    def remember(self, event: Event) -> None: ...
-```
-
-**Timeline:**
-
-When a user clicks any task, Flowstate explains:
-- Where it originated (source event + line reference)
-- Related conversations
-- Related documents
-- Related meetings
-
-**Vector store:** ChromaDB at `http://localhost:8000`
-**Embeddings:** `all-MiniLM-L6-v2` (sentence-transformers, ~80MB)
-
-```bash
-# Preload model
-python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
-```
-
-**Exit criteria:** Every entity has provenance. Memory search returns relevant context in <500ms.
-
----
-
-### Phase 7 — User Model Engine ⬜ Not Started
-
-**Goal:** Build the system's moat — learn exactly how each user works, communicates, and prioritises.
-
-**What is learned:**
-
-```text
-Writing style per relationship type
-Priority corrections
-Communication preferences (formal / informal / short)
-Working hours and timezone
-Relationship-specific tone overrides
-```
-
-**Example model in action:**
-
-```text
-Recipient: Professor Nair   → Formal, complete sentences
-Recipient: Siya (co-founder) → Short, direct, no sign-off
-Recipient: Recruiter         → Friendly, enthusiastic
-```
-
-**Schema:**
-
-```python
-@dataclass
-class Preference:
-    user_id: str
-    key: str                   # e.g. "tone:recruiter"
-    value: str                 # e.g. "friendly"
-    confidence: float
-    evidence: list[str]        # task IDs or event IDs that produced this
-    last_updated: datetime
-```
-
-**Update triggers:**
-
-1. User edits a draft email → tone preference updated
-2. User reassigns a task owner → ownership model updated
-3. User corrects a deadline → deadline inference model updated
-
-**Exit criteria:** User corrections change future AI outputs. Preferences are queryable by the Planning Engine.
-
----
-
-### Phase 8 — Planning Engine ⬜ Not Started
-
-**Goal:** Answer "What should I do next?" using graph + memory + user model.
-
-**Inputs:**
-
-```text
-Graph (dependencies, critical path, blocked work)
-Memory (past context, related events)
-User Model (priorities, working hours, preferences)
-Calendar (free slots, upcoming deadlines)
-```
-
-**Outputs:**
-
-```text
-Recommended task list (ordered)
-Critical path summary
-Blocked work (and what's blocking it)
-Upcoming commitment deadlines
-Suggested schedule for today
-```
-
-**Planning Agent:**
-
-```python
-# backend/agents/planner/agent.py
-
-class PlannerAgent:
-    def __init__(self, graph: GraphEngine, memory: MemoryEngine, user_model: UserModelEngine):
-        ...
-
-    def get_daily_plan(self, user_id: str, date: date) -> Plan: ...
-    def get_recommendations(self, user_id: str) -> list[Recommendation]: ...
-```
-
-Agents **never** call OpenClaw directly. Flow:
-
-```
-Planner Agent
-     ↓
-Planning Engine
-     ↓
-Execution Engine
-     ↓
-Connector Adapter
-     ↓
-OpenClaw
-```
-
-**LLM use:** Reasoning only. No LLM for graph traversal, scheduling arithmetic, or data retrieval.
-
-**Exit criteria:** System produces a ranked daily recommendation list. Recommendations are traceable back to graph + memory inputs.
-
----
-
-### Phase 9 — Execution Engine ⬜ Not Started
-
-**Goal:** Act on behalf of the user, idempotently.
-
-**Capabilities:**
-
-```python
-# backend/core/execution/engine.py
-
-class ExecutionEngine:
-    def draft_email(self, context: Context) -> Draft: ...
-    def send_email(self, draft: Draft) -> None: ...
-    def create_task(self, task: Task) -> str: ...
-    def create_calendar_event(self, event: CalendarEvent) -> None: ...
-    def schedule_meeting(self, participants: list[str], slot: datetime) -> None: ...
-    def generate_summary(self, events: list[Event]) -> str: ...
-```
-
-**Idempotency check (required before every action):**
-
-```python
-task_hash = sha256(f"{task_id}:{owner}:{deadline}".encode()).hexdigest()
-if already_processed(task_hash):
-    return  # Skip — already triggered
-```
-
-**Execution never imports directly from connectors:**
-
-```python
-# ✅ Correct
-self.connector.send_email(to, subject, body)
-
-# ❌ Wrong
-import openclaw; openclaw.gmail.send(...)
-```
-
-**Exit criteria:** All action types execute successfully. Duplicate actions are suppressed by idempotency check. Execution tested against mock connector.
-
----
-
-### Phase 10 — AI Governance & Review Queue ⬜ Not Started
-
-**Goal:** Route low-confidence extractions to human review. Build trust into every task.
-
-**Routing logic:**
-
-```python
-def route_task(task: ExtractedTask):
-    if (task.confidence < 0.75
-        or task.inference_confidence < 0.70
-        or task.is_duplicate_candidate):
-        send_to_review_queue(task)
-    else:
-        auto_approve(task)
-```
-
-**Every task carries:**
-
-```text
-confidence_score        (0.0 – 1.0)
-source_snippet          (exact chat line / email paragraph)
-source_ref              (file name + line number)
-inference_trace         (how the owner was determined)
-```
-
-**Review Queue API:**
-
-```bash
-GET  /api/review-queue
-POST /api/review-queue/:id/approve
-POST /api/review-queue/:id/edit
-POST /api/review-queue/:id/reject
-```
-
-**Exit criteria:** Tasks below threshold reach the review queue. Approved tasks flow into the graph. Rejected tasks are discarded with reason stored.
-
----
-
-### Phase 11 — Frontend & Visualisation ⬜ Not Started
-
-**Goal:** Build the intelligence surface — dashboard, graph, memory timeline, inbox.
+### Optional frontend scaffold
 
 ```bash
 cd frontend
+npm install
 npm run dev
-# http://localhost:3000
 ```
 
-**Views to build:**
+Vite prints the development URL, normally `http://localhost:5173`. This currently serves the starter screen, not a Flowstate product UI.
 
-**Dashboard**
-- Today's priorities (AI-ranked)
-- Critical path summary
-- Upcoming deadlines
-- Blocked work
+### Optional OpenClaw WhatsApp bridge
 
-**Task Graph**
-- Cytoscape.js interactive DAG
-- Critical path highlighted in red
-- Bottleneck nodes flagged with indicator
-- Click any node → Trust Popover
+The bridge requires a shared `FLOWSTATE_BRIDGE_SECRET`, a `FLOWSTATE_TEAM_ID`, and an OpenClaw gateway configured to emit WhatsApp `message_received` hooks. Installation is intentionally manual. Follow [the OpenClaw inbound bridge guide](./docs/openclaw-inbound-bridge.md), which includes the exact plugin commands, environment, smoke test, and live verification steps.
 
-**Trust Popover (click any task):**
+## Testing
 
-```text
-Task: "Complete pitch deck"
-Owner: Rahul (inferred, 87% confidence)
-Deadline: Thursday 6pm (relative → absolute)
-Source: whatsapp_2026-06-15.txt, line 47
-Context: "Rahul can you finish the pitch deck by Thursday evening?"
-```
-
-**Memory Timeline**
-- Past events related to the selected entity
-- Linked conversations, documents, meetings
-
-**Inbox**
-- Suggested actions
-- AI-generated draft emails (editable)
-- Human review queue items
-
-**Install graph library:**
+The automated suites replace external services with isolated databases, controlled queues, and model/vector substitutes. They cover extraction validation and provenance, deadline handling, job publication and lifecycle behavior, transaction rollback, retry idempotency, graph-cycle rejection, review decisions, team isolation, upload-to-results processing, and the signed OpenClaw ingress path.
 
 ```bash
-npm install cytoscape
-npm install react-flow-renderer   # alternative for simpler DAG views
+# Entire automated suite
+.venv/bin/python -m pytest tests/unit tests/integration -v --tb=short
+
+# Faster unit suite
+.venv/bin/python -m pytest tests/unit -q
+
+# Integration suite
+.venv/bin/python -m pytest tests/integration -v --tb=short
+
+# Test discovery only
+.venv/bin/python -m pytest --collect-only -q
 ```
 
-**Exit criteria:** All four views render with live data. Trust Popover is accessible from every task. Graph updates in near-real-time.
-
----
-
-### Phase 12 — Feedback Loop & Continuous Learning ⬜ Not Started
-
-**Goal:** Measure extraction quality and improve the system from every correction.
-
-**Human Feedback Storage:**
-
-Every user edit stores a diff:
-
-```python
-{
-    "original": { "owner": null, "deadline": "Friday" },
-    "edited":   { "owner": "Siya", "deadline": "2026-07-04T17:00:00+05:30" },
-    "task_id": "task_042",
-    "edited_at": "2026-06-28T11:30:00Z"
-}
-```
-
-**Feedback triggers model updates:**
-
-```text
-Owner correction   → ownership inference model recalibrated
-Deadline edit      → deadline normalisation thresholds adjusted
-Tone edit          → user model preference updated
-Priority change    → planning engine weights adjusted
-```
-
-**Synthetic Dataset Generator:**
-
-```bash
-python scripts/synthetic_gen.py --count 200 --output data/synthetic_hackathon.json
-```
-
-**Evaluation:**
-
-```bash
-python scripts/eval.py --dataset data/synthetic_hackathon.json
-```
-
-Expected output:
-
-```
-Precision: 0.941
-Recall:    0.928
-F1 Score:  0.934
-```
-
-Target: **F1 ≥ 0.90** before release.
-
-**Exit criteria:** Every recommendation type has a feedback mechanism. User corrections demonstrably change future outputs. Eval script runs cleanly in CI.
-
----
-
-### Phase 13 — Hybrid Memory Architecture ⬜ Not Started
-
-**Goal:** Ensure all three data stores are live, queryable, and consistent.
-
-| Store | Technology | What It Stores |
-|-------|-----------|----------------|
-| Structured | PostgreSQL | Tasks, owners, deadlines, graph edges, version history, preferences |
-| Vector | ChromaDB | Task embeddings, conversation embeddings, document embeddings |
-| Object | Local FS / S3-compatible | Raw transcripts, uploaded files, OCR outputs |
-
-**Verify all stores operational:**
-
-```bash
-# PostgreSQL
-psql -h localhost -U flowstate_user -d flowstate -c "\dt"
-
-# ChromaDB
-curl http://localhost:8000/api/v1/heartbeat
-
-# Object store
-ls ./storage/objects/
-```
-
-**Migrations:**
-
-```bash
-alembic upgrade head
-```
-
-Tables: `users`, `events`, `tasks`, `commitments`, `owners`, `deadlines`, `graph_edges`, `confidence_scores`, `preferences`, `feedback_diffs`, `version_history`
-
-**Exit criteria:** All three stores persist across restarts. No data loss on service restart.
-
----
-
-### Phase 14 — Integration Testing ⬜ Not Started
-
-**Goal:** Test complete flows end-to-end with automated assertions.
-
-**Key flows to test:**
-
-```text
-Flow 1: File upload → normalise → extract → enrich → graph update → dashboard visible
-Flow 2: Email arrives → connector → activity engine → recommendation → user action
-Flow 3: User edits task → diff stored → user model updated → next draft improved
-Flow 4: Planning query → graph + memory + user model → ranked plan returned
-Flow 5: Low-confidence task → review queue → human approves → enters graph
-```
-
-**Run integration tests:**
-
-```bash
-pytest tests/integration/ -v
-```
-
-**Exit criteria:** All five flows have passing automated tests. No manual click-testing required for regression.
-
----
-
-### Phase 15 — Containerised Deployment ⬜ Not Started
-
-**Goal:** One-command deploy of the entire production stack.
-
-**Build all images:**
-
-```bash
-docker-compose -f docker/docker-compose.yml build
-```
-
-**Start everything:**
-
-```bash
-docker-compose -f docker/docker-compose.yml up
-```
-
-**Services:**
-
-| Service | Port | Description |
-|---------|------|-------------|
-| Backend API | 8001 | FastAPI app |
-| Frontend | 3000 | Next.js dashboard |
-| PostgreSQL | 5432 | Structured DB |
-| ChromaDB | 8000 | Vector store |
-| Redis | 6379 | Async queue |
-| Ollama | 11434 | LLM inference |
-| n8n | 5678 | Workflow engine |
-
-**Teardown:**
-
-```bash
-docker-compose -f docker/docker-compose.yml down -v
-```
-
-**Exit criteria:** `docker-compose up` starts all services cleanly. Application is usable within 60 seconds of command.
-
----
-
-### Phase 16 — Closed Beta ⬜ Not Started
-
-**Goal:** Deploy to 10–20 users. Measure real-world accuracy and retention.
-
-**Metrics to track:**
-
-```text
-Extraction accuracy (precision / recall / F1)
-Time saved per user per week (self-reported)
-Correction rate (how often users edit AI output)
-Feature usage (which engines are used most)
-Retention at 7 days, 14 days, 30 days
-```
-
-**Feedback collection:**
-
-Every recommendation gets explicit feedback:
-
-```text
-Priority suggestion   → ✓ Correct  /  ✗ Wrong
-Email draft           → ✓ Send as-is  /  ✗ Rewrite
-Task owner            → ✓ Correct  /  ✗ Wrong owner
-```
-
-The goal is not "zero bugs." The goal is learning which capabilities users rely on and which assumptions need refinement.
-
----
-
-## ▶️ Running the Full System
-
-```bash
-# 1. Start infrastructure
-docker-compose -f docker/docker-compose.yml up -d postgres chromadb redis
-
-# 2. Start inference runtime
-ollama serve
-
-# 3. Run database migrations
-alembic upgrade head
-
-# 4. Start backend API
-uvicorn backend.api.main:app --host 0.0.0.0 --port 8001 --reload
-
-# 5. Start async job worker (plain Python Redis consumer, not Celery)
-python -m backend.worker
-
-# 6. Start frontend
-cd frontend && npm run dev
-```
-
-Visit `http://localhost:3000`.
-
----
-
-## 🧪 Testing & Evaluation
-
-See [`testing.md`](./testing.md) for the full testing guide.
-
-```bash
-# Unit tests
-pytest tests/unit/ -v
-
-# Integration tests
-pytest tests/integration/ -v
-
-# Extraction accuracy eval
-python scripts/eval.py --dataset data/synthetic_hackathon.json
-
-# Single file end-to-end test
-curl -X POST http://localhost:8001/upload \
-  -F "file=@tests/fixtures/sample_whatsapp.txt" \
-  -F "team_id=test_team"
-```
-
----
-
-## 🐳 Deployment
-
-```bash
-# One-command deploy
-docker-compose -f docker/docker-compose.yml up --build
-
-# Tail backend logs
-docker-compose -f docker/docker-compose.yml logs -f backend
-
-# Full teardown
-docker-compose -f docker/docker-compose.yml down -v
-```
-
-No cloud dependency required — runs entirely locally.
-
----
-
-## 📊 Current Progress
-
-| Phase | Status | Notes |
-|-------|--------|-------|
-| Phase 0 — Architecture Spec | ⬜ Not Started | PRD, EDD, domain model, sequence diagrams |
-| Phase 1 — Foundation | 🔨 In Progress | Canonical domain types, initial schema, durable job lifecycle; CI and auth remain |
-| Phase 2 — Connector Layer | ⬜ Not Started | OpenClaw adapter, event normalisation |
-| Phase 3 — Ingestion & Preprocessing | 🔨 In Progress | Upload API, Redis worker, multimodal normaliser |
-| Phase 4 — Activity Engine | 🔨 In Progress | Transactional Event, Commitment, Task, and provenance-edge persistence; extraction hardening remains |
-| Phase 5 — Graph Engine | 🔨 In Progress | DAG, critical path, bottlenecks |
-| Phase 6 — Memory Engine | ⬜ Not Started | ChromaDB, semantic retrieval, provenance |
-| Phase 7 — User Model Engine | ⬜ Not Started | Preferences, tone, learning |
-| Phase 8 — Planning Engine | ⬜ Not Started | Recommendations, daily plan |
-| Phase 9 — Execution Engine | ⬜ Not Started | Draft, send, schedule, create |
-| Phase 10 — Governance & Review | ⬜ Not Started | Confidence routing, review queue |
-| Phase 11 — Frontend | ⬜ Not Started | Dashboard, graph, memory timeline, inbox |
-| Phase 12 — Feedback Loop | ⬜ Not Started | Diff storage, model recalibration, eval |
-| Phase 13 — Hybrid Memory | ⬜ Not Started | PostgreSQL + ChromaDB + object store verified |
-| Phase 14 — Integration Testing | ⬜ Not Started | End-to-end flow tests |
-| Phase 15 — Containerised Deploy | ⬜ Not Started | One-command docker-compose |
-| Phase 16 — Closed Beta | ⬜ Not Started | 10–20 users, metrics, feedback |
-
----
-
-## 🧭 Engineering Principles
-
-These are pinned. They do not change without an RFC.
-
-1. **Domain-first.** Business concepts (events, commitments, relationships) drive the architecture — not frameworks or infrastructure.
-
-2. **Infrastructure is replaceable.** OpenClaw, n8n, databases, queues, and LLM providers sit behind adapters. Swap any of them by rewriting one folder.
-
-3. **Deterministic where possible.** Graph algorithms, dependency resolution, scheduling, and state transitions do not depend on LLMs. Only three things use LLMs: Activity Engine (extraction), Planning Engine (reasoning), Communicator Agent (drafting).
-
-4. **Commitments, not tasks.** Tasks are ephemeral. The core object is a Commitment — persistent intent that aggregates events, documents, meetings, and tasks into a single trackable unit.
-
-5. **Everything is observable.** Every recommendation is traceable back to the events, graph relationships, and user preferences that produced it. The Trust Popover is not optional.
-
-6. **ADRs are mandatory.** Every major technical decision gets written down in `docs/adr/` before implementation begins.
-
----
-
-## 🗺️ Roadmap — Post MVP
-
-Once all 16 phases are stable on Ollama:
-
-- **Lemonade integration** — AMD's hybrid NPU/iGPU/CPU inference runtime as a drop-in performance layer
-- **Model benchmarking** — Latency and throughput comparison between Ollama and Lemonade on equivalent hardware
-- **Selective offloading** — High-frequency extraction tasks routed to Lemonade; Ollama as fallback
-- **Multi-user workspaces** — Shared commitment graph across a team
-- **Public API** — Allow third-party Flowstate integrations
-
----
-
-## 🐛 Known Issues
-
-- Image OCR (Phase 3) via `pytesseract` is slow on CPU without GPU acceleration. Large screenshots may take 3–8 seconds.
-- The `/enrich` API endpoint is defined in `backend/api/enrichment.py` but is not yet mounted in `backend/api/main.py`. It will not respond until the router is registered.
-- Google Calendar integration requires manual OAuth setup on first run.
-- Redis backpressure not yet handled for large batch uploads.
-- `ConnectorAdapter` is a stub until OpenClaw credentials are configured.
-- n8n `WorkflowAdapter` is a stub — `N8N_BASE_URL` and `N8N_API_KEY` must be set before workflows run.
-
----
-
-## 📎 References
-
-- [Ollama](https://ollama.ai)
-- [ChromaDB](https://docs.trychroma.com)
-- [Sentence Transformers](https://www.sbert.net)
-- [Cytoscape.js](https://js.cytoscape.org)
-- [FastAPI](https://fastapi.tiangolo.com)
-- [NetworkX DAG Docs](https://networkx.org/documentation/stable/reference/algorithms/dag.html)
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)
-- [pytesseract](https://github.com/madmaze/pytesseract)
-- [n8n](https://docs.n8n.io)
-- [Clean Architecture — Robert C. Martin](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
+The automated suite mocks the Ollama HTTP boundary; there is currently no
+separate live-model test in `tests/`. See [testing.md](./testing.md) for the
+testing contract and infrastructure checks.
+
+## Engineering Documentation
+
+- [BUILDLOG.md](./BUILDLOG.md) preserves the full chronological implementation history, debugging notes, architectural changes, and validation record formerly kept in this README.
+- [Architecture Decision Records](./docs/adr/) document the accepted database/graph, adapter, domain, LLM, tenancy, and inbound bridge decisions.
+- [OpenClaw inbound bridge guide](./docs/openclaw-inbound-bridge.md) covers the current live connector boundary and operating procedure.
+- [Testing guide](./testing.md) documents hermetic test commands and optional infrastructure verification.
+- [Inference setup notes](./inference/README.md) describe the repository's Ollama helper scripts; note that some model naming in that older guide differs from the current extractor default.
+- [AGENTS.md](./AGENTS.md) records repository architecture and contribution constraints for coding agents.
+
+## Roadmap
+
+| Stage | Status |
+|---|---|
+| 1. Durable Core | Implemented for the current upload and connector job paths |
+| 2. Live Connector Ingestion | WhatsApp text bridge implemented; live validation and Discord remain in progress/planned |
+| 3. Commitment + Attention Intelligence | Basic commitment/provenance graph implemented; attention modelling planned |
+| 4. Personal Work Model | Planned |
+| 5. Planning / Agent Runtime | Planned |
+| 6. Productization + Broader Connectors | Planned |
+
+## Project Status
+
+Flowstate is under active development. This repository is an evolving MVP and product-engineering research effort, not a finished or production-ready release. The durable processing foundation is real and tested; the broader product vision remains deliberately separated from what the code can do today.
