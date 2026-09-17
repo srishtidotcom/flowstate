@@ -74,7 +74,9 @@ Every item must validate against this exact JSON Schema:
 
 Copy source_id exactly from the bracketed local ID for the source chunk that
 supports the task. Never invent an ID. Use null when an owner or deadline is not
-present. Keep dependency titles identical to another extracted title.
+present. Keep dependency titles identical to another extracted title. Speaker
+and source identifiers are context only: never include them as a prefix or any
+other part of a task title.
 
 Examples:
 
@@ -136,9 +138,14 @@ def validate_extraction(
         if source_id not in source_map:
             raise ExtractionError(f"Ollama returned unknown source_id: {source_id}")
         source_ref, chunk = source_map[source_id]
+        title = _without_speaker_prefix(item["title"], chunk.speaker)
+        if not title:
+            raise ExtractionError(
+                "Ollama returned a title containing only the speaker prefix"
+            )
         tasks.append(
             ExtractedTask(
-                title=item["title"],
+                title=title,
                 owner=item["owner"],
                 deadline=item["deadline"],
                 confidence=item["confidence"],
@@ -148,6 +155,16 @@ def validate_extraction(
             )
         )
     return tasks
+
+
+def _without_speaker_prefix(title: str, speaker: Optional[str]) -> str:
+    """Remove only the exact transport-provided speaker prefix from a title."""
+    if not speaker:
+        return title
+    prefix = f"{speaker}:"
+    if title.startswith(prefix):
+        return title[len(prefix) :].lstrip()
+    return title
 
 
 def _call_ollama(

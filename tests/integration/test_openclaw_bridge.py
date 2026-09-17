@@ -79,7 +79,7 @@ def processor(vector_store):
     return lambda queued: worker.process_connector_job(
         queued,
         extractor=fake_extract,
-        enricher=lambda task, team_id: task,
+        enricher=lambda task, team_id, reference_datetime: task,
         embedder=lambda texts: [[1.0, 2.0] for _ in texts],
         vector_store=vector_store,
     )

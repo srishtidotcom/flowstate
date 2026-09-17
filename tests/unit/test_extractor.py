@@ -59,6 +59,7 @@ def test_prompt_has_schema_json_only_instruction_and_four_required_examples():
     assert '"maximum": 1.0' in SYSTEM_PROMPT
     assert '"source_id"' in SYSTEM_PROMPT
     assert "source_ref" not in SYSTEM_PROMPT
+    assert "never include them" in SYSTEM_PROMPT
 
 
 def test_valid_response_is_bound_to_exact_source_text():
@@ -78,6 +79,48 @@ def test_valid_response_is_bound_to_exact_source_text():
     messages = calls[0][1]["json"]["messages"]
     assert "[source_1]" in messages[1]["content"]
     assert "chat.txt:7" not in json.dumps(messages)
+
+
+def test_exact_speaker_prefix_is_removed_but_source_snippet_is_unchanged():
+    chunk = Chunk(
+        text="Video is due tomorrow, make sure it gets done by the team",
+        speaker="+919876543210",
+        source_ref="event:message-a",
+    )
+
+    tasks = extract_tasks(
+        [chunk],
+        post=lambda *args, **kwargs: FakeResponse(
+            json.dumps(
+                [
+                    _valid_item(
+                        title="+919876543210: Finish the video",
+                        deadline="tomorrow",
+                    )
+                ]
+            )
+        ),
+    )
+
+    assert tasks[0].title == "Finish the video"
+    assert tasks[0].source_snippet == chunk.text
+
+
+def test_unrelated_title_text_is_not_modified_by_speaker_cleanup():
+    chunk = Chunk(
+        text="Call +919876543210 to confirm the video.",
+        speaker="sender-a",
+        source_ref="event:message-a",
+    )
+
+    tasks = extract_tasks(
+        [chunk],
+        post=lambda *args, **kwargs: FakeResponse(
+            json.dumps([_valid_item(title="Call +919876543210 to confirm the video")])
+        ),
+    )
+
+    assert tasks[0].title == "Call +919876543210 to confirm the video"
 
 
 def test_canonical_event_uuid_is_restored_from_local_source_id():

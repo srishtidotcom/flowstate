@@ -1,13 +1,21 @@
+from datetime import datetime
+
 from backend.models import Task
 from backend.enrichment import infer_owner, normalize_deadline, detect_duplicates
 from backend.db.database import get_db
 from backend.db.repositories import get_task_by_id
 
-def enrich_task(task: Task, team_id: str) -> Task:
+def enrich_task(
+    task: Task,
+    team_id: str,
+    reference_datetime: datetime | None = None,
+) -> Task:
     """
     Run the full enrichment pipeline:
     1. Infer owner if missing
-    2. Normalize deadline
+    2. Normalize deadline relative to the source timestamp when available.
+       Uploads have no canonical source timestamp and explicitly retain the
+       current-time fallback in ``normalize_deadline``.
     3. Detect duplicates
     """
     # Step 1: Infer owner
@@ -15,8 +23,8 @@ def enrich_task(task: Task, team_id: str) -> Task:
         task.owner = infer_owner(task, team_id)
 
     # Step 2: Normalize deadline
-    if task.deadline and not task.deadline.startswith("20"):
-        task.deadline = normalize_deadline(task.deadline)
+    if task.deadline:
+        task.deadline = normalize_deadline(task.deadline, reference_datetime)
 
     # Step 3: Detect duplicates
     duplicates = detect_duplicates(task, team_id)

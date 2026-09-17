@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import datetime
 from typing import Any, Callable, Iterable
 
 import redis
@@ -18,6 +19,7 @@ from backend.preprocessing.normalizer import event_to_chunks, normalize
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 QUEUE_NAME = "flowstate:jobs"
 r = redis.from_url(REDIS_URL)
+Enricher = Callable[[Task, str, datetime | None], Task]
 
 
 def process_job(
@@ -25,7 +27,7 @@ def process_job(
     *,
     normalizer: Callable[[str, str], Iterable[Any]] = normalize,
     extractor: Callable[[list[Any]], Iterable[Any]] = extract_tasks,
-    enricher: Callable[[Task, str], Task] = enrich_task,
+    enricher: Enricher = enrich_task,
     embedder: Callable[[list[str]], list[list[float]]] | None = None,
     vector_store: Callable[[list[Task], list[list[float]]], None] | None = None,
 ) -> ActivityPersistenceResult:
@@ -34,7 +36,9 @@ def process_job(
     _bind_original_filename(chunks, job["filename"])
     extracted = list(extractor(chunks))
     tasks = _to_tasks(extracted, job["team_id"], job["filename"])
-    tasks = [enricher(task, job["team_id"]) for task in tasks]
+    # Uploaded documents have no canonical source Event timestamp. Passing None
+    # explicitly preserves the documented current-time enrichment fallback.
+    tasks = [enricher(task, job["team_id"], None) for task in tasks]
     _apply_governance(tasks)
 
     persisted = persist_extracted_activity(job, chunks, tasks)
@@ -48,7 +52,7 @@ def process_connector_job(
     job: dict,
     *,
     extractor: Callable[[list[Any]], Iterable[Any]] = extract_tasks,
-    enricher: Callable[[Task, str], Task] = enrich_task,
+    enricher: Enricher = enrich_task,
     embedder: Callable[[list[str]], list[list[float]]] | None = None,
     vector_store: Callable[[list[Task], list[list[float]]], None] | None = None,
 ) -> ActivityPersistenceResult:
@@ -65,7 +69,7 @@ def process_connector_job(
         raise ValueError("Connector Event has no text to process")
     extracted = list(extractor(chunks))
     tasks = _to_tasks(extracted, job["team_id"], event_id)
-    tasks = [enricher(task, job["team_id"]) for task in tasks]
+    tasks = [enricher(task, job["team_id"], event.timestamp) for task in tasks]
     _apply_governance(tasks)
 
     persisted = persist_extracted_activity(

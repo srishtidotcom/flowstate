@@ -48,7 +48,7 @@ def test_worker_failure_is_inspectable_and_retry_is_idempotent(
             queued,
             normalizer=lambda path, file_type: [chunk],
             extractor=fake_extract,
-            enricher=lambda task, team_id: task,
+            enricher=lambda task, team_id, reference_datetime: task,
             embedder=lambda texts: [[1.0, 2.0]],
             vector_store=vector_store,
         )
@@ -135,7 +135,7 @@ def test_extraction_failure_persists_no_downstream_activity(
             extractor=lambda chunks: (_ for _ in ()).throw(
                 ExtractionError("schema violation")
             ),
-            enricher=lambda task, team_id: task,
+            enricher=lambda task, team_id, reference_datetime: task,
         )
 
     try:

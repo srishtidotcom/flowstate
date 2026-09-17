@@ -66,7 +66,7 @@ def test_upload_to_api_results_pipeline(
         return worker.process_job(
             job,
             extractor=fake_extract,
-            enricher=lambda task, team_id: task,
+            enricher=lambda task, team_id, reference_datetime: task,
             embedder=lambda texts: [[float(index), 1.0] for index, _ in enumerate(texts)],
             vector_store=lambda tasks, vectors: stored_vectors.extend(zip(tasks, vectors)),
         )
