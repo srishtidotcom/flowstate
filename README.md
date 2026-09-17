@@ -6,7 +6,21 @@ Work rarely begins as a clean task. It arrives through messages, documents, meet
 
 Flowstate is being built to observe that activity, preserve the original evidence, extract structured commitments and tasks, and model how work should compete for attention over time. The repository currently contains the durable ingestion and processing foundation for that direction; attention modelling, planning, and agent execution remain future work.
 
-<!-- Add Flowstate Attention Graph screenshot here -->
+## Product Vision
+
+The following concept visuals show the intended Flowstate experience. They are product mockups, not screenshots of the current frontend implementation.
+
+### Attention forecast
+
+![Flowstate attention forecast showing attention pressure over the coming week](./assets/ui1.png)
+
+### Task clarification
+
+![Flowstate task clarification screen for capturing effort and importance](./assets/ui2.png)
+
+### Today's attention
+
+![Flowstate today view showing the commitments driving current attention](./assets/ui3.png)
 
 ## Why Flowstate
 
