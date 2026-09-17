@@ -48,7 +48,11 @@ TASK_LIST_SCHEMA = {
                 "type": "array",
                 "items": {"type": "string", "minLength": 1},
             },
-            "source_ref": {"type": "string", "minLength": 1},
+            "source_id": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^source_[1-9][0-9]*$",
+            },
         },
         "required": [
             "title",
@@ -56,7 +60,7 @@ TASK_LIST_SCHEMA = {
             "deadline",
             "confidence",
             "dependencies",
-            "source_ref",
+            "source_id",
         ],
     },
 }
@@ -68,23 +72,23 @@ Return JSON only: one array and no preamble, markdown, comments, or trailing tex
 Every item must validate against this exact JSON Schema:
 {json.dumps(TASK_LIST_SCHEMA, sort_keys=True)}
 
-Copy source_ref exactly from the bracketed reference for the source chunk that
-supports the task. Never invent a reference. Use null when an owner or deadline
-is not present. Keep dependency titles identical to another extracted title.
+Copy source_id exactly from the bracketed local ID for the source chunk that
+supports the task. Never invent an ID. Use null when an owner or deadline is not
+present. Keep dependency titles identical to another extracted title.
 
 Examples:
 
-Input: [chat.txt:4] Asha: Rahul, send the revised deck tomorrow.
-Output: [{{"title":"Send the revised deck","owner":"Rahul","deadline":"tomorrow","confidence":0.96,"dependencies":[],"source_ref":"chat.txt:4"}}]
+Input: [source_1] Asha: Rahul, send the revised deck tomorrow.
+Output: [{{"title":"Send the revised deck","owner":"Rahul","deadline":"tomorrow","confidence":0.96,"dependencies":[],"source_id":"source_1"}}]
 
-Input: [notes.txt:8] We should verify the launch metrics.
-Output: [{{"title":"Verify the launch metrics","owner":null,"deadline":null,"confidence":0.82,"dependencies":[],"source_ref":"notes.txt:8"}}]
+Input: [source_1] We should verify the launch metrics.
+Output: [{{"title":"Verify the launch metrics","owner":null,"deadline":null,"confidence":0.82,"dependencies":[],"source_id":"source_1"}}]
 
-Input: [email.txt:12] Priya will submit the budget by EOD Friday.
-Output: [{{"title":"Submit the budget","owner":"Priya","deadline":"by EOD Friday","confidence":0.97,"dependencies":[],"source_ref":"email.txt:12"}}]
+Input: [source_1] Priya will submit the budget by EOD Friday.
+Output: [{{"title":"Submit the budget","owner":"Priya","deadline":"by EOD Friday","confidence":0.97,"dependencies":[],"source_id":"source_1"}}]
 
-Input: [plan.txt:2] Sam: Draft the proposal today. [plan.txt:3] Lee: Review the proposal after Sam drafts it.
-Output: [{{"title":"Draft the proposal","owner":"Sam","deadline":"today","confidence":0.94,"dependencies":[],"source_ref":"plan.txt:2"}},{{"title":"Review the proposal","owner":"Lee","deadline":null,"confidence":0.91,"dependencies":["Draft the proposal"],"source_ref":"plan.txt:3"}}]
+Input: [source_1] Sam: Draft the proposal today. [source_2] Lee: Review the proposal after Sam drafts it.
+Output: [{{"title":"Draft the proposal","owner":"Sam","deadline":"today","confidence":0.94,"dependencies":[],"source_id":"source_1"}},{{"title":"Review the proposal","owner":"Lee","deadline":null,"confidence":0.91,"dependencies":["Draft the proposal"],"source_id":"source_2"}}]
 """.strip()
 
 
@@ -101,9 +105,9 @@ def extract_tasks(
         batch = limited_chunks[offset : offset + BATCH_SIZE]
         source_map = _source_map(batch, offset)
         conversation = "\n".join(
-            f"[{source_ref}] "
+            f"[{source_id}] "
             f"{chunk.speaker + ': ' if chunk.speaker else ''}{chunk.text}"
-            for source_ref, chunk in source_map.values()
+            for source_id, (_, chunk) in source_map.items()
         )
         raw_output = _call_ollama(conversation, post=post)
         all_tasks.extend(validate_extraction(raw_output, source_map))
@@ -128,10 +132,10 @@ def validate_extraction(
 
     tasks = []
     for item in data:
-        source_ref = item["source_ref"]
-        if source_ref not in source_map:
-            raise ExtractionError(f"Ollama returned unknown source_ref: {source_ref}")
-        _, chunk = source_map[source_ref]
+        source_id = item["source_id"]
+        if source_id not in source_map:
+            raise ExtractionError(f"Ollama returned unknown source_id: {source_id}")
+        source_ref, chunk = source_map[source_id]
         tasks.append(
             ExtractedTask(
                 title=item["title"],
@@ -187,9 +191,8 @@ def _source_map(
     offset: int,
 ) -> dict[str, tuple[str, Chunk]]:
     result = {}
-    for index, chunk in enumerate(chunks, start=offset + 1):
-        source_ref = chunk.source_ref or f"chunk:{index}"
-        if source_ref in result:
-            source_ref = f"{source_ref}#chunk-{index}"
-        result[source_ref] = (source_ref, chunk)
+    for local_index, chunk in enumerate(chunks, start=1):
+        source_id = f"source_{local_index}"
+        source_ref = chunk.source_ref or f"chunk:{offset + local_index}"
+        result[source_id] = (source_ref, chunk)
     return result
